@@ -1,0 +1,31 @@
+# Generated outputs — do not commit personal documents
+job-outputs/
+
+# Personal profile — do not commit your resume to a public repo
+profile/
+
+# Claude config and memory — do not commit (personal preferences and private data)
+.claude/config/
+.claude/memory/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Temp resume drafts — contain personal contact info
+tmp_*
+
+# Lock files
+.~lock.*
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Plist files
+*.plist
