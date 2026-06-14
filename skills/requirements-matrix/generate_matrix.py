@@ -51,7 +51,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _setup_lib_path():
-    lib_path = os.path.normpath(os.path.join(SCRIPT_DIR, '../../.claude/lib'))
+    lib_path = os.path.normpath(os.path.join(SCRIPT_DIR, '../lib'))
     if lib_path not in sys.path:
         sys.path.insert(0, lib_path)
 

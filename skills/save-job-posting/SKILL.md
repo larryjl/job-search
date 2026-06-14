@@ -38,7 +38,7 @@ The project root must be resolved at runtime — never hardcode a session path. 
 
 ```python
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root, get_postings_dir
 
 PROJECT_ROOT = get_project_root()
@@ -80,7 +80,7 @@ If it already exists skip to step 6 and tell the user it already existed.
 
 ### Step 1c: Build the new Filename
 
-Use `make_filename(company, title, ext)` from `.claude/lib/filename_builder.py`:
+Use `make_filename(company, title, ext)` from `skills/lib/filename_builder.py`:
 - `ext="pdf"` for URL or PDF file inputs
 - `ext="docx"` for uploaded DOCX, LinkedIn, or pasted text inputs
 
@@ -148,7 +148,7 @@ Use `url_to_pdf()` from the shared lib — it handles the weasyprint → Playwri
 
 ```python
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from pdf_converter import url_to_pdf
 
 # raw_html = full HTML string from web_fetch (do not alter structure or styling)

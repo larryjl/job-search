@@ -48,7 +48,7 @@ from datetime import date
 from typing import Any, Optional
 from urllib.parse import urlencode
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root
 from http_client import fetch_url_urllib as fetch_url
 

@@ -94,7 +94,7 @@ Resolve the project root at runtime in every script that writes a file:
 
 ```python
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root
 
 PROJECT_ROOT  = get_project_root()

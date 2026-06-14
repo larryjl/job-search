@@ -49,7 +49,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from typing import Optional
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root
 from http_client import fetch_json_curl as fetch_json
 from extractors import strip_html

@@ -25,7 +25,7 @@ import subprocess
 import sys
 from datetime import date
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root, get_postings_dir
 from filename_builder import make_filename
 from docx_helpers import set_metadata

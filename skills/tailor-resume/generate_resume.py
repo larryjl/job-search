@@ -61,7 +61,7 @@ PROJECT_ROOT = None  # resolved lazily via get_project_root()
 
 
 def _setup_lib_path():
-    lib_path = os.path.join(SCRIPT_DIR, '../../.claude/lib')
+    lib_path = os.path.join(SCRIPT_DIR, '../lib')
     lib_path = os.path.normpath(lib_path)
     if lib_path not in sys.path:
         sys.path.insert(0, lib_path)

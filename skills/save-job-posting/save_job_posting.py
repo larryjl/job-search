@@ -23,7 +23,7 @@ import os
 import argparse
 import shutil
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 
 from project_paths import get_postings_dir, get_project_root
 from filename_builder import make_filename

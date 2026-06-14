@@ -244,7 +244,7 @@ Study direction: ...
 
 ```python
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from project_paths import get_project_root
 
 UPSKILL_DIR = os.path.join(get_project_root(), "job-outputs", "upskill")

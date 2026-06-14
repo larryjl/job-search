@@ -89,6 +89,8 @@ ATS APIs return live, structured data directly from the source — no stale Goog
 
 All three APIs (Greenhouse, Lever, Ashby) are public and unauthenticated. For endpoints, field names, and the `curl | python3` pattern, see **`ats-api-reference.md`** in this skill folder.
 
+**Implementation script:** `skills/job-scout/ats_sweep.py` — run this for bulk ATS API fetching. It imports shared utilities from `skills/lib/` (project_paths, filename_builder, extractors).
+
 ##### ATS-API Steps
 
 **A1 — Resolve slug for each company**

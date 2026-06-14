@@ -7,7 +7,7 @@ definitions inline.
 
 Usage:
     import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
     from docx_helpers import (
         NAVY, BLACK, FONT,
         set_spacing, add_run, set_margins, keep_with_next,

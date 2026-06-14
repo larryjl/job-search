@@ -35,7 +35,7 @@ Archetype drives proof point selection, founder framing, and interview story pri
 Check `job-outputs/postings/` for an existing file for this Company + Role. If not found, save it using `save_job_posting.py`:
 
 - **Pasted text or text extracted via Chrome (`get_page_text`):** `--input-type pasted` → saves as `.docx`
-- **Non-LinkedIn URL:** use `url_to_pdf()` from `.claude/lib/pdf_converter.py` → saves as `.pdf`
+- **Non-LinkedIn URL:** use `url_to_pdf()` from `skills/lib/pdf_converter.py` → saves as `.pdf`
 - **LinkedIn URL:** use `save_linkedin_posting.py` → saves as `.docx`
 
 Never write a `.txt` file — all output must be `.docx` or `.pdf`.

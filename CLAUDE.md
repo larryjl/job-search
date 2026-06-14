@@ -121,13 +121,13 @@ Filenames: underscores only; company/role lowercase with hyphens (e.g. `shopify`
 
 ## Shared Python Library
 
-All skill scripts must import shared utilities from `.claude/lib/` instead of reimplementing them inline.
+All skill scripts must import shared utilities from `skills/lib/` instead of reimplementing them inline.
 
 ```python
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../.claude/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 # or from project root:
-sys.path.insert(0, os.path.join(get_project_root(), '.claude/lib'))
+sys.path.insert(0, os.path.join(get_project_root(), 'skills/lib'))
 ```
 
 **Modules:**
