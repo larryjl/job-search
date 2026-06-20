@@ -32,13 +32,7 @@ Silently load before starting:
 
 **No workarounds.** Do not attempt alternative URL patterns, direct `/jobs/view/` navigation, `read_page`, `web_fetch`, or processing partial card metadata. Stop cleanly and let the user re-run.
 
-**Mode prompt:** Before navigating, ask:
-```
-Which LinkedIn section?
-  top-applicant  — Jobs where you'd be a top applicant
-  preferences    — Jobs based on your preferences
-```
-Store the answer as `SCOUT_LINK_MODE`. If the user already specified the mode in their command (e.g. `/scout-link preferences`), skip the prompt.
+**Mode:** Default is `preferences`. Set `SCOUT_LINK_MODE = preferences` unless the user explicitly specifies `top-applicant` in their command. Do not prompt the user to choose.
 
 **URL input:**
 - No URL given, or `linkedin.com/jobs` given → navigate to `https://www.linkedin.com/jobs/`, wait 3s for render, then:
@@ -46,7 +40,7 @@ Store the answer as `SCOUT_LINK_MODE`. If the user already specified the mode in
   - Both sections render asynchronously via JS and will not appear in page text immediately even if visible in the viewport. The 3s wait above is the primary render gate — do not call `get_page_text` before it completes. Scroll behaviour per section is handled in the branches below.
   - Branch on `SCOUT_LINK_MODE`:
 
-  **`top-applicant` (default):**
+  **`top-applicant`:**
   - Scroll down 2–3 ticks and wait 3s to bring the section into view.
   - Call `get_page_text` and confirm **"Jobs where you'd be a top applicant"** appears. If not: scroll further, wait 3s, retry. If still not found after two attempts: output `⚠️ "Jobs where you'd be a top applicant" section not visible. This section requires a LinkedIn Premium account and an active profile. Re-run scout-link when the section is visible.` and stop.
   - Use `javascript_tool` to click the "Show all" link scoped to that section:
@@ -68,7 +62,7 @@ Store the answer as `SCOUT_LINK_MODE`. If the user already specified the mode in
     Wait 3s for results to load.
   - **Verify landing URL:** Confirm the URL now contains `origin=QUALIFICATION_LANDING`. If it does not, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to top applicant results. Re-run scout-link when LinkedIn renders normally.`
 
-  **`preferences`:**
+  **`preferences` (default):**
   - Call `get_page_text` and confirm **"Jobs based on your preferences"** appears. If not: wait 3s and retry once. If still not found after two attempts: output `⚠️ "Jobs based on your preferences" section not visible. Re-run scout-link when the section is visible.` and stop.
   - Use `javascript_tool` to click the "Show all" link scoped to that section:
     ```js
@@ -88,6 +82,14 @@ Store the answer as `SCOUT_LINK_MODE`. If the user already specified the mode in
     ```
     Wait 3s for results to load.
   - **Verify landing URL:** Confirm the URL has changed from `https://www.linkedin.com/jobs/` to a search results URL (any URL containing `/jobs/search/` or a `?` query string). If it has not changed, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to preferences results. Re-run scout-link when LinkedIn renders normally.`
+
+**Page offset (optional):** If the user specified a page number (e.g. "skip to page 3"), apply it after the full mode navigation above is complete and the search results URL is confirmed. Calculate the offset as `(N-1) * 25` and inject it into the current URL:
+```js
+const url = new URL(window.location.href);
+url.searchParams.set('start', [OFFSET]);
+window.location.href = url.toString();
+```
+Wait 3s for the page to render. The full mode navigation (clicking "Show all", verifying landing URL) always runs first — the offset is applied after the search context is established, never before.
 
 **Login check:** After navigation, call `get_page_text`. If the page contains login/sign-in prompts and no job card content → output:
 ```
@@ -147,12 +149,13 @@ Skipped cards are **included in the output table** (Step 8) with `⛔ age-skip`,
 
 **Dismiss skipped cards:** For each skipped card (age-skip, title-skip, or location-skip), use `javascript_tool` to click its dismiss button — this tells LinkedIn to stop recommending the job.
 
-Match on **both title and company** to avoid dismissing the wrong card when multiple cards share the same title (e.g. two "Data Analyst" roles):
+Match on **both title and company** at every stage — never fall back to a title-only match, as multiple cards can share the same title (e.g. two "Data Analyst" roles from different companies):
 ```js
 // Replace [Job Title] and [Company] with exact strings from the card list
 const cards = Array.from(document.querySelectorAll('li.scaffold-layout__list-item, div[data-job-id]'));
-// Primary: find the dismiss button scoped to the matching card element
 let dismissed = 'not found';
+
+// Primary: find the dismiss button scoped to the card that matches BOTH title AND company
 for (const card of cards) {
   if (card.textContent.includes('[Job Title]') && card.textContent.includes('[Company]')) {
     const btn = card.querySelector('button[aria-label*="Dismiss"]') ||
@@ -160,17 +163,28 @@ for (const card of cards) {
     if (btn) { btn.click(); dismissed = 'dismissed'; break; }
   }
 }
-// Fallback: if card-scoped search found nothing, try global aria-label match
-// (safe when only one card has this exact title)
+
+// Fallback: global search, but still require the button's nearest card ancestor
+// to contain [Company] — never click on title match alone
 if (dismissed === 'not found') {
-  const btn = Array.from(document.querySelectorAll('button')).find(el =>
+  const allBtns = Array.from(document.querySelectorAll('button')).filter(el =>
     el.getAttribute('aria-label') === 'Dismiss [Job Title] job'
   );
-  if (btn) { btn.click(); dismissed = 'dismissed (fallback)'; }
+  for (const btn of allBtns) {
+    // Walk up to the card container and verify company is present
+    let el = btn;
+    let cardFound = false;
+    for (let i = 0; i < 12; i++) {
+      el = el.parentElement;
+      if (!el) break;
+      if (el.textContent.includes('[Company]')) { cardFound = true; break; }
+    }
+    if (cardFound) { btn.click(); dismissed = 'dismissed (fallback)'; break; }
+  }
 }
 dismissed
 ```
-Replace `[Job Title]` and `[Company]` with the exact strings from Step 2. If `'not found'` on both attempts, skip silently — do not let a failed dismiss block card processing.
+Replace `[Job Title]` and `[Company]` with the exact strings from Step 2. If `'not found'` on both attempts, skip silently — do not let a failed dismiss block card processing. **Never dismiss a card without confirming the company name is present in the same DOM ancestor — a title-only match is not sufficient.**
 
 Announce: `⏭️ [N] card(s) skipped (age, title, or location) — will appear in table.`
 
@@ -210,7 +224,15 @@ const next = Array.from(document.querySelectorAll('a, button')).find(el => el.te
 if (next) { next.click(); 'clicked' } else { 'not found' }
 ```
 Wait 3s for the new page to load, then restart from Step 2 on the new set of cards. Continue paginating until at least one new JD is found, or until LinkedIn shows no "Next" button (end of results), at which point announce: `📭 All pages exhausted — no new roles found.`
-6. **Wait 3s** as a separate tool call before touching the right panel — the panel renders asynchronously and must not be read immediately after the click. This wait is mandatory regardless of how fast prior steps completed.
+6. **Signal tab activity** — immediately after the card click, run:
+   ```js
+   window.focus();
+   document.dispatchEvent(new Event('visibilitychange'));
+   document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 800, clientY: 400 }));
+   'signaled'
+   ```
+   This signals to the browser that the tab is active and unthrottles deferred JS renders. Run this as a separate tool call before the wait below.
+6a. **Wait 3s** as a separate tool call before touching the right panel — the panel renders asynchronously and must not be read immediately after the click. This wait is mandatory regardless of how fast prior steps completed.
 6b. **Body length check:** Before attempting extraction, confirm the page has grown beyond the card-list baseline. Run:
     ```js
     document.body.innerText.length
@@ -262,7 +284,9 @@ Wait 3s for the new page to load, then restart from Step 2 on the new set of car
 9. Check extracted text for job description content (responsibilities, requirements, or qualifications):
    - **Present and non-empty** → JD extracted; run filter inline (from `skills/filter/SKILL.md`) on this card's JD before moving to the next card
    - **Empty or null** → wait 3s and retry Step 6 once as a separate tool call.
-     - Still empty after retry → stop and ask: "JD not loading for [Company] — [Title] (ID: [jobId]). Right panel may not have rendered. How would you like to proceed? (skip this card / try again / stop scout)"
+     - Still empty after retry → **re-click the card** (click it again via `javascript_tool`) and wait 3s. This resolves lazy-render failures where LinkedIn delays injecting the right panel DOM. Re-check body length and extraction after the re-click.
+     - Still empty after re-click → stop and ask: "JD not loading for [Company] — [Title] (ID: [jobId]). Right panel may not have rendered. How would you like to proceed? (skip this card / try again / stop scout)"
+     - **Session-wide panel failure** (multiple consecutive native-LinkedIn cards returning null): do NOT reload the page. Instead, continue clicking remaining cards — the issue resolves itself as the page warms up. Cohere-pattern fix: re-clicking the same card after the page has been active longer often succeeds.
      - Do NOT navigate to `https://www.linkedin.com/jobs/view/[jobId]/` as a fallback — this leaves the search results page and breaks the card extraction flow.
 
 **Do not navigate away from the search results page between cards.** Clicking a card updates the right panel in-place — the left card list remains intact and the next card can be clicked immediately after extraction.

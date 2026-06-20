@@ -52,8 +52,8 @@ If Chrome not connected: "⚠️ Claude in Chrome is not connected — open sear
 Announce: `🔍 Starting company sweep: [N] ats-api + [N] browser-only (Tier 1–2 only) + [N] unknown (detection pending)`
 Load all companies from `company-ranking.md` in rank order; route each by section in `profile/target-companies.md`. Run ats-api companies first (all tiers), then browser-only.
 **Browser-only scope cap:** In a full `/scout-company` run, only sweep browser-only companies in Tier 1 and Tier 2. Tier 3 and Tier 4 browser-only companies are skipped — note at the end of the run: `ℹ️ Browser-only Tier 3–4 skipped (run /scout-company companies:[list] to sweep individually)`. Named runs (`/scout-company companies:[list]`) sweep all named companies regardless of tier.
-If Chrome not connected and browser-only companies exist: "Browser-only companies cannot be swept. Run ats-api only, or connect Chrome first? (ats-api-only / connect first)"
-If Chrome not connected and ats-api only: "JD fallback unavailable — empty content fields will be marked ⚠️ Partial JD. Continue? (yes / connect first)"
+If Claude in Chrome not connected and browser-only or partial-access companies exist: proceed with ats-api companies first, then apply the **Claude in Chrome unavailable** fallback (see B1) for browser-only and partial-access companies — web search signal check only, no scoring.
+If Claude in Chrome not connected and ats-api companies only: proceed. JD content fallback via Chrome is unavailable — any ATS-API role with an empty or unvalidated JD will be marked ⚠️ Unverified and not scored (see Step 5 JD validation gate).
 
 ### `/scout-company companies: [list]` — Named sweep
 Check each company's section in `profile/target-companies.md`: `### ATS-API` → ats-api; `### Browser-Only` → browser-only; `### Unknown` or not present → Auto-Detection first. Run ats-api companies first, then browser-only.
@@ -106,7 +106,7 @@ Use the `curl -s | python3` pattern from `ats-api-reference.md`. Filter titles (
 
 Any posting returned by the API is confirmed live — no Chrome needed for liveness.
 
-**JD content fallback:** If JD field is empty or < 200 chars: navigate to posting URL in Chrome → `get_page_text`. If Chrome unavailable → mark ⚠️ Partial JD; score from what's available.
+**JD content fallback:** If JD field is empty or < 200 chars: navigate to posting URL in Claude in Chrome → `get_page_text`. If Claude in Chrome unavailable → mark ⚠️ Unverified; do not score (see Step 5 JD validation gate).
 
 **A3 — ATS detection for unknown companies**
 
@@ -180,10 +180,10 @@ For each open search URL that passed deduplication and Step 3:
 1. `navigate` to the posting URL
 2. Wait 2–3 seconds for JS to render
 3. `get_page_text`
-4. Classify:
-- ✅ Verified open — title, description, and Apply button present
+4. Classify liveness:
+- ✅ Live — posting page loaded with recognisable content; proceed to Step 5 JD validation gate before scoring
 - ❌ Dead — 404 or closure language → drop; add to Dead URL Cache
-- ⚠️ Unverified — blocked or no recognisable content → include with flag
+- ⚠️ Unverified — blocked or no recognisable content → include with flag; will fail JD validation gate at Step 5
 
 Write verified open postings to `## Verified Postings Cache` with source `job-scout`.
 
@@ -192,6 +192,14 @@ Write verified open postings to `## Verified Postings Cache` with source `job-sc
 ### Browser-Only Path — Chrome Navigation
 
 Used for: browser-only companies in `/scout-company` and named runs; ats-api companies escalated after slug detection fails. Requires Claude in Chrome.
+
+**Claude in Chrome unavailable — browser-only and partial-access companies:**
+If Claude in Chrome is not connected when browser-only or partial-access companies are due to be swept:
+1. For each company, run a web search: `[Company Name] "data analyst" OR "data engineer" OR "analytics engineer" site:[careers domain]` as a signal check only
+2. If results suggest possible data roles exist: mark company `⚠️ Claude in Chrome required — roles unverified` in output and scout-cache; log nothing to jobs.csv (no URL, no score)
+3. If results confirm no data roles: update Last Checked and Re-check After in target-companies.md as normal; no jobs.csv row
+4. Surface all `⚠️ Claude in Chrome required` companies in the Step 10 post-table summary under **Partially investigated**
+5. Never score or log a pending row for a browser-only or partial-access company without Claude in Chrome
 
 **B1 — Check profile/target-companies.md:** Known Careers URL → navigate there directly. Re-check After not yet reached → skip silently.
 
@@ -206,17 +214,25 @@ After surfacing, do not auto-skip on the next run — retry once, then re-flag i
 
 **B2 — Navigate and render:** `navigate` to careers page; wait 2–3s for JS.
 
-**B3 — Extract job listings:** Try in order: `get_page_text` → `find` with data role query → `screenshot` (fallback). If page uses a portal (PeopleSoft, Taleo, iCIMS, ADP): note the subdomain; navigate to listings page directly if URL is known; use `find` before clicking through.
+**B3 — Extract job listings:** The approach depends on posting volume:
+
+**Default (small boards — review all):** Navigate to the listings page, extract all job titles via `get_page_text` or DOM, then filter out obviously irrelevant titles (administrative, clinical, trades, etc.) before clicking into each remaining role. Most browser-only companies fall into this category.
+
+**High-volume boards (keyword search mode):** If a company's board has too many total postings to review exhaustively (rough threshold: >50 active roles), use keyword search instead of browsing all jobs. Use the same title terms as the ATS-API filter (Step A2): `data analyst`, `data engineer`, `analytics engineer`, `analytics manager`, `integration analyst`, `business analyst`, `data integration`, `data migration`, `systems analyst`. Companies in this category are noted in `profile/target-companies.md` with their specific search method. Currently: **Alberta Health Services** and its subboards (see AHS entry for exact Chrome MCP search steps).
+
+Try in order for extraction: `get_page_text` → `find` with data role query → `screenshot` (fallback). If page uses a portal (PeopleSoft, Taleo, iCIMS, ADP): note the subdomain; navigate to listings page directly if URL is known; use `find` before clicking through.
+
+**SPA search forms — filling and submitting correctly:** On AJAX-driven search forms, never use `type` + Enter to submit a keyword search. SPAs listen for specific JS events that keyboard simulation doesn't reliably fire — the visible field updates but the search doesn't execute. Instead: use `form_input` to set the field value, then explicitly click the Search/Submit button. This applies to any SPA with a keyword search form (confirmed on Oracle/SelectMinds boards; likely applies to other platforms too).
 
 **SPA troubleshooting (if `get_page_text` returns a shell with no job listings):** Try in order:
 1. **Check for embedded ATS:** Run `document.querySelectorAll('script[src], iframe')` and look for known ATS sources (Jobvite, Greenhouse, Lever, Ashby, iCIMS, Workday, SmartRecruiters, Jobvite). If found, extract the board URL and navigate there directly — this is faster and more reliable than scraping the SPA shell. (Example: Enverus careers page embeds a Jobvite iframe; navigating to `jobs.jobvite.com/enverus/jobs` bypasses the SPA entirely.)
 2. **Click category/discipline tabs:** If it's a fully custom SPA with no embedded ATS, URL params likely do nothing — the search is client-side. Navigate the UI by clicking category or discipline tabs to trigger rendering. Read `get_page_text` after each click. (Example: Shopify's board requires clicking discipline tabs like "Data" to surface job listings.)
-3. **Intercept the API:** After page load, call `read_network_requests` filtering for `job` or `api` to find JSON endpoints the SPA is calling. If found, hit the endpoint directly via `mcp__workspace__bash` curl — faster and avoids rendering entirely.
+3. **Intercept the API:** After page load, call `read_network_requests` filtering for `job` or `api` to find JSON endpoints the SPA is calling. If a JSON endpoint is found, attempt to call it directly via `mcp__workspace__bash` curl — but note that some platforms (e.g. Oracle/SelectMinds) bind sessions to the browser and return "Invalid Access" on all external requests even with valid session cookies and CSRF tokens. If curl returns "Invalid Access", abandon this approach and fall back to DOM extraction in the browser.
 4. **If all three fail:** Mark company as `⚠️ SPA — manual browse required` in targets.md Notes, set Re-check After = today + 14 days, and surface in the post-run summary.
 
 **B4 — Click into matching roles:** For each relevant title, click → `get_page_text` on new tab → close tab.
 
-**PeopleSoft / new-tab portals:** Some portals (e.g. City of Calgary, `calgary.ca/careers.html`) list jobs as plain HTML links that open the JD in a new PeopleSoft tab (`recruiting.[domain].ca/psc/...?SiteId=X&JobOpeningId=Y`). For these: (1) navigate to the listings page, (2) click a job title link — PeopleSoft opens in a new tab with the correct `SiteId` and `JobOpeningId` parameters automatically, (3) call `get_page_text` on the new tab to extract the full JD, (4) close the PeopleSoft tab, (5) return to the listings tab and repeat. Do NOT attempt to navigate directly to the PeopleSoft portal root — the correct URL parameters are only set when clicking from the listings page. Re-run `tabs_context_mcp` after each close to get the refreshed tab ID.
+**PeopleSoft / new-tab portals:** Some portals (e.g. City of Calgary, `calgary.ca/careers.html`) list jobs as plain HTML links that open the JD in a new PeopleSoft tab (`recruiting.[domain].ca/psc/...?SiteId=X&JobOpeningId=Y`). **Privacy filter warning:** `getAttribute('href')` on these links returns `[BLOCKED: Cookie/query string data]` — do NOT try to read the href. Instead: (1) navigate to the listings page, (2) use `find` tool to locate the job title link by text and `left_click` its ref — PeopleSoft opens in a new tab automatically, (3) call `get_page_text` on the new tab to extract the full JD (Job ID is in the URL as `JobOpeningId=XXXXXX`), (4) close the PeopleSoft tab, (5) return to listings tab and repeat. Re-run `tabs_context_mcp` after each close to get the refreshed tab ID. Do NOT attempt to navigate directly to the PeopleSoft portal root.
 
 **B5 — Record portal details:** Update `profile/target-companies.md` ATS column, Careers URL, and Notes with portal type and quirks.
 
@@ -279,7 +295,21 @@ Note: `ℹ️ [N] result(s) hidden — already tracked.`
 
 ## Step 5 — Run Filter Score
 
-Run the filter (`skills/filter/SKILL.md`) on each listing.
+**JD Validation Gate — run before scoring every listing, all paths:**
+
+All three checks must pass. Any failure → mark ⚠️ Unverified, skip filter, proceed to Step 7 with blank Filter_Score and blank Top_Skills.
+
+1. **Character floor:** JD text ≥ 200 chars. Fail if below.
+2. **Structural markers:** All three must be present in the extracted text:
+   - Job title
+   - A description body (responsibilities or duties section)
+   - An application CTA ("apply", "submit", "how to apply", or equivalent)
+   If any are absent, fail.
+3. **Completeness judgment:** Read the extracted text and assess: does this read like a complete job description, or is it a shell, a truncated snippet, a listing-page summary, or a page that failed to render? If it appears incomplete — missing requirements, missing responsibilities, cut off mid-sentence, or consisting only of a title and company blurb — fail.
+
+All three must pass to proceed. A listing that passes all three is considered a **verified full JD** and may be scored.
+
+Run the filter (`skills/filter/SKILL.md`) on each listing that passes the validation gate.
 
 ---
 
@@ -420,6 +450,12 @@ Worth a look: [Job Title] at [Company] — [Score]/10
               [One sentence: what makes it interesting]
 
 Skip:         [N] roles scored below 6/10
+
+Fully swept:       [Company], [Company], ... (ATS-API confirmed or Claude in Chrome navigation completed)
+Partially investigated: [Company] — [reason, e.g. Claude in Chrome required — roles unverified], ...
+                   (Omit section if none)
+Skipped:           [Company] (Re-check After [date]), ... (Re-check After not yet reached)
+                   (Omit section if none)
 
 ─────────────────────────────────────────
 ```

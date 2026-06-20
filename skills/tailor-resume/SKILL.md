@@ -83,7 +83,12 @@ For each requirement: find direct match, transferable skill, or flag gap. Note u
 - Only skills relevant to JD; exact JD terminology; only skills you can substantiate
 
 **Experience:**
-- **Bracketed titles:** Role titles in the master resume may include a standardised descriptor in brackets (e.g. "Analyst [Data Strategist]"). These brackets exist to aid matching — they are not official titles. When tailoring: always keep the official title first. Retain the bracketed descriptor only if it is more relevant to the target role than the official title alone — in that case, format it as "Official Title [Bracketed Title]". If the official title is already the best match, remove the brackets entirely. Never leave raw brackets in the final resume.
+- **Bracketed titles:** Role titles in the master resume may include a standardised descriptor in brackets (e.g. "Lead Data Analyst (Data Engineer)"). These brackets exist to map non-standard official titles to industry-standard job title vocabulary — they are not official titles. When tailoring, apply this decision rule:
+  1. **Does the bracketed term appear in the JD, or is it the standard industry title for the target role?** If yes → keep it: format as "Official Title (Bracketed Title)".
+  2. **Is the official title already a strong match for the target role (or better than the bracketed term)?** If yes → remove the brackets entirely; use only the official title.
+  3. **Is the bracketed term from a different domain than the target role?** (e.g., target is a BA role but the bracket says "Data Engineer") → remove the brackets entirely.
+  - Default to removal: if in doubt, the official title alone is cleaner than adding noise.
+  - Never leave raw brackets in the final resume.
 - List roles in reverse chronological order (most recent first)
 - Within each role, order bullets from most JD-relevant and strongest to least relevant and weakest
 - Action verb + What + How/Why + Result/Impact; quantify everything
