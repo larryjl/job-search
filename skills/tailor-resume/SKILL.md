@@ -18,15 +18,27 @@ In review mode:
    - If the user uploaded a `.pdf`: extract text with `pdftotext <file> -` (shell) or `pdfinfo` + `pdftotext`
    - If the user pasted plain text: use it directly
    - If the user named a file (e.g., "the Telus resume") or gave a company/role: glob `job-outputs/resumes/` case-insensitively to find the matching `.docx`, then extract its text with python-docx
-2. **Resolve the JD:** same as Step 1 of draft mode — if the user provided a URL, fetch it; if pasted, use as-is; if referencing a saved posting, read from `job-outputs/postings/`
+2. **Resolve the JD:** follow Step 0a exactly — check `jobs.csv` → `Posting_File`, then glob `job-outputs/postings/`, then fall back to a user-supplied URL or pasted text. Never search the web for the posting.
 3. **Skip to Step 4.5** (Reviewer Agent) — pass the resolved resume text as `[INSERT FULL RESUME TEXT]`
 4. After the reviewer returns, apply feedback (same rules as draft mode Step 4.5), then continue from **Step 5** onward (preview → confirm → generate files → post-save)
 
 ---
 
-## Step 0.5 — Load Match Report (if available)
+## Step 0 — Resolve JD and Match Report from Local Files
 
-Before analysing the JD, check `job-outputs/reports/` for an existing match report for this company + role (glob case-insensitively for `match_report_[company]_[role]_*.md` or `match_report_[company]_[role]_*.docx`).
+**Before any web fetch or search**, resolve the JD and match report from local files.
+
+### 0a — Resolve JD
+
+1. Check `jobs.csv` for a row matching this company + role (case-insensitive).
+   - If found, read the `Posting_File` field. If non-empty, read the file from `job-outputs/postings/[Posting_File]` and use it as the JD. Done — do not fetch from the web.
+2. If `Posting_File` is blank or no CSV row exists, glob `job-outputs/postings/` case-insensitively for `[company]*[role]*.pdf` or `[company]*[role]*.txt`. If a match is found, read it and use it as the JD. Done — do not fetch from the web.
+3. Only if no local file is found: if the user supplied a URL or pasted text directly, use that. If a URL was given, note that you are fetching because no saved posting was found locally.
+4. **Never search the web for a job posting.** If no local file exists and no URL or pasted text was provided, ask: "I couldn't find a saved posting for [Company] / [Role]. Please paste the JD or provide the posting URL."
+
+### 0b — Load Match Report
+
+Check `job-outputs/reports/` for an existing match report for this company + role (glob case-insensitively for `match_report_[company]_[role]_*.md` or `match_report_[company]_[role]_*.docx`).
 
 **If found:**
 - Read the report and extract:
@@ -37,7 +49,7 @@ Before analysing the JD, check `job-outputs/reports/` for an existing match repo
 - Use this as a primary input alongside the JD in Steps 1–3. The match report's gap analysis supersedes your own inferences where they conflict — it was produced from a more detailed evaluation.
 - Silently note: `📋 Match report loaded: [filename]`
 
-**If not found:** proceed silently to Step 1 with JD only.
+**If not found:** proceed silently with JD only.
 
 ---
 
@@ -73,10 +85,13 @@ For each requirement: find direct match, transferable skill, or flag gap. Note u
 
 ## Step 3 — Draft Resume
 
-**Professional Summary (2–3 sentences):**
-- Lead with discipline/experience level, not job title ("Product leader with 8 years..." not "Consultant with...")
+**Professional Summary (2–3 sentences, 50–70 words total):**
+- Tell a tight story, not a coverage list. Structure: sentence 1 = who the candidate is (discipline + level); sentence 2 = the specific thing they've done that matches the JD's core problem; sentence 3 = the context or scale that makes it credible (e.g., regulated environment, team size, scope).
+- The one thing a hiring manager should walk away knowing after 5 seconds — build every sentence around that, not around comprehensiveness.
+- No skill enumeration in the summary. If a skill matters, it belongs in the skills section and in bullets — not here.
 - Only include topics explicitly in the JD — no inferred adjacent skills
 - Remove industry-specific jargon if the target role is outside that industry (e.g., remove healthcare terminology for non-healthcare roles)
+- No parental leave note or career gap explanation in the summary
 
 **Skills Section:**
 - Single-line format: **Category:** skill1, skill2, skill3
@@ -218,6 +233,8 @@ The script handles: formatting, metadata, PDF conversion, page-count check, and 
 ## Step 8 — Post-Save (automatic, no prompt)
 
 1. Run save-job-posting on JD (skip if posting already exists for this company + role)
-2. Log row in `job-outputs/jobs.csv` with status `applied`, `Resume_Used` set to the `.docx` filename, and `Posting_File` set to the posting filename from save-job-posting
+2. Update `job-outputs/jobs.csv` for this company + role:
+   - **If a row already exists** (match on Company + Role, case-insensitive): update it in-place — set `Status` → `applied`, `Resume_Used` → the `.docx` filename, and `Posting_File` → the posting filename from save-job-posting. Do NOT append a new row. Do not overwrite other already-populated fields (e.g., `Filter_Score`, `Posting_URL`, `Top_Skills`).
+   - **If no row exists**: append a new row with `Status` = `applied`, `Resume_Used` set to the `.docx` filename, and `Posting_File` set to the posting filename from save-job-posting.
 3. Read the `Posting_URL` field from `jobs.csv` for this company + role row
 4. Confirm: "✅ Posting saved + resume saved. Application logged as applied." — if `Posting_URL` is non-empty, append it on the next line: "🔗 Posting URL: [url]"

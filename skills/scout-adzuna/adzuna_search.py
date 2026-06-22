@@ -22,7 +22,6 @@ Output JSON format:
                 "title": "...",
                 "company": "...",
                 "location": "...",
-                "description": "...",   # truncated ~500 chars from API
                 "salary_min": N or null,
                 "salary_max": N or null,
                 "salary_display": "...",
@@ -204,7 +203,6 @@ def parse_job(job: dict) -> dict:
         "title": job.get("title", ""),
         "company": job.get("company", {}).get("display_name", ""),
         "location": job.get("location", {}).get("display_name", ""),
-        "description": job.get("description", ""),
         "salary_min": job.get("salary_min"),
         "salary_max": job.get("salary_max"),
         "salary_display": format_salary(job),
@@ -230,7 +228,7 @@ def run_search(app_id: str, app_key: str, what: str, where: Optional[str], label
         "app_key": app_key,
         "results_per_page": RESULTS_PER_SEARCH,
         "what": what,
-        "max_days_old": 30,
+        "max_days_old": 14,
         "content-type": "application/json",
         "sort_by": "date",
     }

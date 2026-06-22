@@ -342,8 +342,8 @@ Recommendation: [one sentence]
 
 **After all listings are processed**, continue to Step 7 as normal. The ranked table in Step 9 should include the Match Score and Gaps for any listing where auto job-match ran:
 
-| # | Company | Role | Filter Score | Match Score | Gaps | URL |
-|---|---------|------|--------------|-------------|------|-----|
+| # | Company | Role | Filter Score | Note | Match Score | Gaps | URL |
+|---|---------|------|--------------|------|-------------|------|-----|
 
 ---
 
@@ -419,9 +419,9 @@ Ranked by: Filter Score
 
 **Ranked table:**
 
-| # | Company | Role | Filter Score | Match Score | Gaps | URL |
-|---|---------|------|--------------|-------------|------|-----|
-| 1 | [Company] | [Title] | 🟢 9/10 | 78 — Good odds | [top 2–3 gaps or —] | [link] |
+| # | Company | Role | Filter Score | Note | Match Score | Gaps | URL |
+|---|---------|------|--------------|------|-------------|------|-----|
+| 1 | [Company] | [Title] | 🟢 9/10 | [1–2 phrase reason for score] | 78 — Good odds | [top 2–3 gaps or —] | [link] |
 
 **Sorting:**
 - `/scout-company`: sort by company rank from `company-ranking.md` (Tier 1 first, then row order within tier); Filter Score shown but does not affect sort
@@ -430,6 +430,7 @@ Ranked by: Filter Score
 **Table rules:**
 - Always include the direct posting URL as a markdown hyperlink; paste batch with no URL → show `pasted`
 - ⚠️ Unverified results shown but noted
+- Note: always populate — 1–2 phrases explaining the Filter Score for every row (e.g. "Exact title match; all required tools present", "Good role fit; missing dbt", "Title mismatch — PM role", "Requires secret clearance")
 - Match Score: blank if auto job-match did not run (e.g. ⚠️ Unverified listings)
 - Gaps: top 2–3 gaps from Block B of job-match; `—` if job-match did not run
 - Companies with no open data roles: `ℹ️ No matching roles: [list]` (discovery modes only)

@@ -66,17 +66,17 @@ Chrome — if not connected, ask: "Results cannot be verified without Chrome. Co
 
 Read `.claude/memory/raw-results-queue.json` → `adzuna` section.
 
-Before processing, scan `adzuna.items` for entries where `run_date` is more than 7 days ago and `processed` is false. Flag these as expired:
+Before processing, scan `adzuna.items` for entries where `run_date` is more than 3 days ago and `processed` is false. Flag these as expired:
 ```
-⚠️ [N] queued item(s) expired (>7 days old) — dropped without processing: [Company — Title, ...]
+⚠️ [N] queued item(s) expired (>3 days old) — dropped without processing: [Company — Title, ...]
 ```
 Mark expired items `processed: true` with `expired: true`.
 
 Count remaining unprocessed items after expiry:
 
-- If `last_run` is null or more than 7 days ago → **fresh start**: reset `last_page` to 0, clear all items from `adzuna.items`, proceed to Z2.
+- If `last_run` is null or more than 3 days ago → **fresh start**: reset `last_page` to 0, drop all items from `adzuna.items` where `run_date` is more than 14 days ago (or `run_date` is absent), retain the rest (processed or not) for pre-Chrome ID dedup, proceed to Z2.
 - If unprocessed items remain → **skip Z2**: go directly to Z3 to process from the existing queue. Do not fetch a new page.
-- If no unprocessed items remain and `last_run` is within 7 days → **fetch next page**: proceed to Z2.
+- If no unprocessed items remain and `last_run` is within 3 days → **fetch next page**: proceed to Z2.
 
 ---
 
@@ -88,7 +88,14 @@ Increment `last_page` by 1. Run:
 python3 <project_root>/skills/scout-adzuna/adzuna_search.py --output /tmp/adzuna_results.json --page <last_page>
 ```
 
-12 searches: 6 role terms × 2 locations (Calgary, Canada remote), 50 results per call. Script deduplicates on Adzuna job ID, applies hard excludes (category whitelist, US location/auth signals), flattens and enriches results, and writes to `/tmp/adzuna_results.json`. Announce raw count, deduped count, candidates.
+12 searches: 6 role terms × 2 locations (Calgary, Canada remote), 50 results per call. Script deduplicates on Adzuna job ID, applies hard excludes (category whitelist, US location/auth signals), flattens and enriches results, and writes to `/tmp/adzuna_results.json`.
+
+After reading the output file, announce:
+```
+📦 Raw: [N] | Deduped: [N] | Hard-excluded: [N] | Candidates: [N]
+📄 Page [last_page] of ~[ceil(max(total_available across all searches) / 50)] — [max(total_available)] total Adzuna matches across all search terms
+```
+Use `max(search["total_available"] for search in searches)` as the best estimate of pool size (each term returns its own count; the max approximates the broadest reach). Omit the page line if all `total_available` values are 0 or null.
 
 Read `/tmp/adzuna_results.json` (processed results — not raw API output). For each result, add to `adzuna.items` as:
 ```json
@@ -100,7 +107,6 @@ Read `/tmp/adzuna_results.json` (processed results — not raw API output). For 
   "title": "...",
   "company": "...",
   "location": "...",
-  "description": "...",
   "salary_min": null,
   "salary_max": null,
   "salary_display": "...",
@@ -188,7 +194,7 @@ Log inline: `✓ [Company] — [Role] → ✅ Source-live | resolved: https://..
 
 **Z4b — Verified Postings Cache dedup + jobs.csv deduplication** *(sub-agent only — executed in adzuna-queue-batch.md, runs after Z4 completes)*
 
-For each item with a resolved URL, check Verified Postings Cache (resolved URL, date ≤ 7 days): dead → drop silently; verified with score → use cached score; unverified → keep. No match → proceed to check 2.
+For each item with a resolved URL, check Verified Postings Cache (resolved URL, date ≤ 3 days): dead → drop silently; verified with score → use cached score; unverified → keep. No match → proceed to check 2.
 
 Source tag `scout-adzuna` is passed through to CSV writes and cache write-back inside each sub-agent batch.
 
@@ -241,8 +247,8 @@ Recommendation: [one sentence]
 
 **After all listings are processed**, continue to Step 7 as normal. The ranked table in Step 9 should include the Match Score and Gaps for any listing where auto job-match ran:
 
-| # | Company | Role | Filter Score | Match Score | Gaps | URL |
-|---|---------|------|--------------|-------------|------|-----|
+| # | Company | Role | Filter Score | Note | Match Score | Gaps | URL |
+|---|---------|------|--------------|------|-------------|------|-----|
 
 ---
 
@@ -253,7 +259,7 @@ Recommendation: [one sentence]
 For every listing that was scored by the filter:
 - Status: `pending` if ≥6/10; `skipped` if below 6/10.
 - Filter_Score: the /10 score. (Leave blank if JD was not retrieved.)
-- Top_Skills: top 3 skills as a comma-separated string (e.g. `"dbt, Snowflake, SQL"`). These are the most emphasized in the requirements and responsibilities. (Leave blank if JD was not retrieved.)
+- Top_Skills: top 3 skills pipe-separated (e.g. `dbt | Snowflake | SQL`). These are the most emphasized in the requirements and responsibilities. (Leave blank if JD was not retrieved.)
 - Posting_URL: canonical URL if available; blank if no URL
 - Notes: skip reason for below-threshold rows (e.g. "Filter score 4/10 — seniority mismatch"); blank for ≥6/10
 - Source: `scout-adzuna`
@@ -306,17 +312,19 @@ Ranked by: Filter Score
 
 **Ranked table:**
 
-| # | Company | Role | Filter Score | Match Score | Gaps | URL |
-|---|---------|------|--------------|-------------|------|-----|
-| 1 | [Company] | [Title] | 🟢 9/10 | 78 — Good odds | [top 2–3 gaps or —] | [link] |
+| # | Company | Role | Filter Score | Note | Match Score | Gaps | Location | URL |
+|---|---------|------|--------------|------|-------------|------|----------|-----|
+| 1 | [Company] | [Title] | 🟢 9/10 | [1–2 phrase reason for score] | 78 — Good odds | [top 2–3 gaps or —] | [City, Province / Remote / Hybrid — confirmed only] | [link] |
 
 **Sorting:** sort by Filter Score descending; ties broken by location preference (Calgary first, Remote second, On-site last).
 
 **Table rules:**
 - Always include the direct posting URL as a markdown hyperlink
 - ⚠️ Unverified results shown but noted
+- Note: always populate — 1–2 phrases explaining the Filter Score for every row (e.g. "Exact title match; all required tools present", "Good role fit; missing dbt", "Title mismatch — PM role", "Requires secret clearance")
 - Match Score: blank if auto job-match did not run (e.g. ⚠️ Unverified listings)
 - Gaps: top 2–3 gaps from Block B of job-match; `—` if job-match did not run
+- Location: city/province from the JD, plus work model (Remote / Hybrid / On-site) **only if explicitly stated in the JD**. Do not infer work model from city alone. If unconfirmed, just show the city/province (e.g. "Calgary, AB" not "Calgary, AB (remote unconfirmed)").
 - Score colour: 🟢 9–10 | 🟡 7–8 | 🟠 6 | 🔴 below 6
 
 ---

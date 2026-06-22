@@ -1,6 +1,8 @@
 # Adzuna Queue Batch — Sub-Agent Instructions
 
-You are processing one batch of up to 50 unprocessed items from the Adzuna job queue. This is a sub-agent invocation. You have a single job: process the batch, write all results, and return a short status string. No summaries, no explanations beyond the status line.
+You are processing one batch of up to 50 unprocessed items from the Adzuna job queue. This is a sub-agent invocation. You have a single job: process the batch, write all results, and return a short status string.
+
+**Output rule:** Return only the status line at the end (Step 6 format). Do not print per-item results, JD text, block output, or intermediate scoring to chat. The exception is file write errors, which must be noted in the status line. Running job-match and saving files in Step 3g is mandatory work — the "no output" rule means suppress chat output, not skip the step.
 
 ---
 
@@ -80,18 +82,26 @@ Run `skills/filter/SKILL.md` on the full JD. Score /10.
 For every item that reached scoring (including below-threshold):
 - Status: `pending` if ≥6/10; `skipped` if below
 - Filter_Score, Top_Skills, Posting_URL (canonical), Work_Type, Contract_Length, Source: `scout-adzuna`
-- Notes: skip reason if below threshold; location flags if any
+- Work_Type: populate only if explicitly stated in the JD (`Remote`, `Hybrid`, `On-site`). Leave blank if not confirmed — do not infer from city name alone.
+- Notes: skip reason if below threshold; other strategic flags (e.g. deadlines, contract terms). Do NOT add notes like "remote unconfirmed" or "verify remote eligibility" — if work model isn't in the JD, simply leave Work_Type blank.
 - Skip if row already exists for same Posting_URL
 
 For unverified: status `pending`, blank Filter_Score, Notes: `⚠️ Unverified — JD not retrieved; review and verify before proceeding`. Do NOT use `skipped` — skipped items are suppressed from review queues and the status command.
 
 ### 3g — Auto quick job-match (≥6/10 only)
-For every item scoring ≥6/10, immediately run quick job-match per `skills/job-match/SKILL.md`:
+For every item scoring ≥6/10, run the following in order. Do all of this silently — do not print match results, block output, or intermediate scoring to chat.
+
+**3g-i — Save job posting**
+Run the save-job-posting skill using the JD text extracted in 3c:
+- Input type: `pasted` (JD was extracted via `get_page_text`, not a file upload)
+- Use `skills/save-job-posting/save_job_posting.py --input-type pasted --company "[Company]" --title "[Role]" --input-text "[JD text]"`
+- Write the returned filename to the `Posting_File` column of the existing `jobs.csv` row
+
+**3g-ii — Run quick job-match**
+Run quick job-match per `skills/job-match/SKILL.md`:
 - Use the full JD already extracted in 3c — do not re-fetch
-- Step 0.5a saves the posting file automatically
-- Step Final writes Match_Score and Match_Label to the existing `jobs.csv` row
-- Do NOT output the match result to chat — run silently and write to CSV only
-- Do NOT save a match report file (quick mode only)
+- Skip Step 0.5a (posting already saved in 3g-i above)
+- Step Final: save the `.md` match report to `job-outputs/reports/` as normal, AND write `Match_Score` and `Match_Label` to the existing `jobs.csv` row
 
 ### 3h — Update scout-cache.md
 Append all processed items to `## Verified Postings Cache`:
@@ -125,10 +135,10 @@ Auto job-match run: [N]
 Return exactly this format and nothing else:
 
 ```
-BATCH DONE. Processed: [N] | Passed threshold: [N] | Queue remaining: [N]
+BATCH DONE. Processed: [N] | Passed threshold: [N] | Queue remaining: [N] | Title-skipped: [Company — Title, ...]
 ```
 
-If queue remaining is 0, append ` | QUEUE EMPTY`.
+`Title-skipped` is the pipe-delimited list of `Company — Title` pairs dropped at step 3b due to title hard-exclude (role out of scope). If none were skipped by title, omit the field entirely. If queue remaining is 0, append ` | QUEUE EMPTY`.
 
 ---
 
@@ -138,5 +148,5 @@ If queue remaining is 0, append ` | QUEUE EMPTY`.
 - Never ask the user questions — make decisions per the skill rules
 - Chrome is required — if unavailable, mark all items ⚠️ Unverified and write to CSV accordingly, then return status
 - Write all files before returning status — do not return early
-- Do not output match results, JD text, or intermediate scoring to chat
+- Do not output match results, JD text, or intermediate scoring to chat — but do not skip Step 3g because of this rule; run it fully and suppress its output
 - If a file write fails, note it in the status line: `| WRITE ERROR: [file]`

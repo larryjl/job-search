@@ -77,6 +77,7 @@ Map natural language to skills without asking confirmation. The skill file defin
 | scout-adzuna / scout-adz | `skills/scout-adzuna/SKILL.md` | broad Canadian market search via Adzuna API; surfaces roles outside target companies |
 | scout-adzuna drain | `skills/scout-adzuna/SKILL.md` | drain full Adzuna queue via sequential sub-agents (50 items/batch); runs until empty or session cap |
 | scout-link | `skills/scout-link/SKILL.md` | scrape a live LinkedIn search results page via Chrome; scores filter for each card |
+| scout-indeed | `skills/scout-indeed/SKILL.md` | scrape Indeed Canada job search results via Chrome; extracts all jks from results page in one pass, visits each viewjob page for JD + JSON-LD metadata, runs filter inline |
 | paste-batch | `skills/job-scout/SKILL.md` | paste one or more JDs directly — no web search or Chrome; scores filter (/10) |
 | job-match | `skills/job-match/SKILL.md` | quick: snapshot + top gaps + score; saves posting + updates CSV (score + label only) |
 | job-match-full | `skills/job-match/SKILL.md` | full: all blocks + positioning + competitive landscape + ATS keywords; saves report + updates CSV |

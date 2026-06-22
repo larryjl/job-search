@@ -82,12 +82,14 @@ Display a results table. Show all jobs, including skipped ones.
 
 Example:
 ```
-| #  | Company  | Role              | Filter Score | Status      | Reason (if skipped/flagged)     |
+| #  | Company  | Role              | Filter Score | Status      | Note                            |
 |----|----------|-------------------|--------------|-------------|---------------------------------|
-| 1  | Shopify  | Senior Analyst    | 9/10         | ✅ Match     |                                 |
+| 1  | Shopify  | Senior Analyst    | 9/10         | ✅ Match     | Strong role + skills match      |
 | 2  | Stripe   | Analytics Eng     | 7/10         | ✅ Match     | Missing: dbt                    |
 | 3  | Acme Co  | Data Engineer     | 4/10         | ⚠️ Skip      | Missing: Spark, Airflow         |
 | 4  | US Corp  | Data Analyst      | ⛔           | ⛔ Hard block | Requires US citizenship         |
+
+**Note column:** Always populate for every row — not just skipped/flagged ones. For eligible and strong matches, write 1–2 phrases explaining the score (e.g. "Exact title match; all required tools present", "Good role fit; missing dbt"). For skipped rows, note the gaps or constraint. For hard blocks, note the disqualifier.
 ```
 
 ---

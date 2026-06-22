@@ -124,10 +124,11 @@ Before clicking any card, apply two checks. Either check failing → skip withou
 
 **Age check** (card-level only, applied before title/location checks):
 - Look up the card's title in `CARD_DATES`
-- If a `datetime` value is found AND the posting date is > 14 days before today → skip with `⛔ age-skip`
+- If a `datetime` value is found AND the posting date is > 14 days before today → skip with `⛔ age-skip`. Exactly 14 days ago ("2 weeks ago") passes — only strictly more than 14 days triggers the skip.
 - If the title is absent from `CARD_DATES` (Promoted or no date shown) → allow through; do not filter
 
 **Title blocklist** (case-insensitive substring match — skip if any term appears in the title):
+⚠️ Exception: "Developer" qualified by a data domain (SQL, ETL, BI, Data, Analytics) does NOT trigger the "Software Developer" block — e.g. "SQL Developer", "ETL Developer", "BI Developer" all pass.
 - Software Engineer
 - Software Developer
 - Data Scientist
@@ -147,46 +148,13 @@ Before clicking any card, apply two checks. Either check failing → skip withou
 
 Skipped cards are **included in the output table** (Step 8) with `⛔ age-skip`, `⛔ title-skip`, or `⛔ location-skip` in the Filter Score column.
 
-**Dismiss skipped cards:** For each skipped card (age-skip, title-skip, or location-skip), use `javascript_tool` to click its dismiss button — this tells LinkedIn to stop recommending the job.
+**Queue title-skipped cards for dismiss confirmation:** For each **title-skip** card only, add it to a `DISMISS_QUEUE` list. Do not click any dismiss buttons during the run. The queue is presented to the user at the end of the run (Step 9) for confirmation before any dismissals happen.
 
-Match on **both title and company** at every stage — never fall back to a title-only match, as multiple cards can share the same title (e.g. two "Data Analyst" roles from different companies):
-```js
-// Replace [Job Title] and [Company] with exact strings from the card list
-const cards = Array.from(document.querySelectorAll('li.scaffold-layout__list-item, div[data-job-id]'));
-let dismissed = 'not found';
+**Age-skip and location-skip cards are NOT queued for dismissal** — dismissing these would negatively affect LinkedIn's recommendation algorithm. They are skipped silently without any dismiss action.
 
-// Primary: find the dismiss button scoped to the card that matches BOTH title AND company
-for (const card of cards) {
-  if (card.textContent.includes('[Job Title]') && card.textContent.includes('[Company]')) {
-    const btn = card.querySelector('button[aria-label*="Dismiss"]') ||
-                Array.from(card.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Dismiss [Job Title] job');
-    if (btn) { btn.click(); dismissed = 'dismissed'; break; }
-  }
-}
+`DISMISS_QUEUE` entry format: `{ company, title, skip_reason }` (e.g. `{ "Dasro Consulting Inc.", "SAP Data Analyst", "title-skip" }`).
 
-// Fallback: global search, but still require the button's nearest card ancestor
-// to contain [Company] — never click on title match alone
-if (dismissed === 'not found') {
-  const allBtns = Array.from(document.querySelectorAll('button')).filter(el =>
-    el.getAttribute('aria-label') === 'Dismiss [Job Title] job'
-  );
-  for (const btn of allBtns) {
-    // Walk up to the card container and verify company is present
-    let el = btn;
-    let cardFound = false;
-    for (let i = 0; i < 12; i++) {
-      el = el.parentElement;
-      if (!el) break;
-      if (el.textContent.includes('[Company]')) { cardFound = true; break; }
-    }
-    if (cardFound) { btn.click(); dismissed = 'dismissed (fallback)'; break; }
-  }
-}
-dismissed
-```
-Replace `[Job Title]` and `[Company]` with the exact strings from Step 2. If `'not found'` on both attempts, skip silently — do not let a failed dismiss block card processing. **Never dismiss a card without confirming the company name is present in the same DOM ancestor — a title-only match is not sufficient.**
-
-Announce: `⏭️ [N] card(s) skipped (age, title, or location) — will appear in table.`
+Announce: `⏭️ [N] card(s) skipped (age, title, or location) — [N] title-skip(s) queued for dismiss confirmation.`
 
 ---
 
@@ -212,13 +180,15 @@ For each card not skipped in 3, in order:
 2. Wait 2–3s for the right panel to load.
 3. **Verify the card loaded correctly:** Read `currentJobId` from the page URL (via `javascript_tool`: `new URL(window.location.href).searchParams.get('currentJobId')`). Store this as `EXPECTED_JOB_ID`. Also read the tab title — it should contain the expected company name and role title. If the tab title shows a different company or role than expected, do not record this ID — log `⚠️ [Company] — [Title] → ID mismatch in tab title; skipping` and proceed to next card. **Never record a job ID that was inferred, guessed, or constructed without clicking the card.**
 4. Construct canonical URL: `https://www.linkedin.com/jobs/view/[jobId]/`
-5. **Dedup check:** look up the job ID in `## Verified Postings Cache` in `scout-cache.md` (match on URL). If found → skip JD extraction; use cached Filter Score if present; log `↩️ [Company] — [Title] → cached, skipping`; proceed to next card.
-5b. **CSV deduplication:** run two checks in order:
-   - **URL match:** check `job-outputs/jobs.csv` `Posting_URL` column (case-insensitive exact match).
-   - **If no URL match:** check for a row with the same company name (case-insensitive) AND same role title (case-insensitive) where the CSV `Date` field is within the last 30 days.
+5. **Dedup check:** run checks in order, stopping at the first match:
+   - **Card-skip cache:** check the `### scout-link card skips` table in `.claude/memory/scout-cache.md` for a row with matching company + title within the last 60 days → drop silently; proceed to next card.
+   - **CSV URL match:** check `Posting_URL` column (case-insensitive exact match).
+   - **CSV company+title match:** check for a CSV row with the same company name (case-insensitive) AND same role title (case-insensitive) where `Date` is within the last 30 days.
 
-   For any match found: status `closed` or `skipped` → drop silently; proceed to next card. Any other status → keep; flag `⚠️ already applied`. **In all cases where a CSV match is found** (any status), write the URL to the `## Verified Postings Cache` in `scout-cache.md` with the existing CSV status as a note — so the cache catches it before a click on the next run.
-5c. **All-duplicate check:** If every non-title-skipped card on the current page was a duplicate (already in CSV or cache) — i.e. zero new JDs were extracted and scored — automatically advance to the next page rather than stopping. Click the "Next" pagination link at the bottom of the results using `javascript_tool`:
+   For any CSV match found:
+   - status `closed` or `skipped` → drop silently; proceed to next card.
+   - Any other status → log `⚠️ [Company] — [Title] → already in CSV (status: [status], date: [date]); skipping` and proceed to next card. **Do not extract the JD, do not run the filter, do not append a new CSV row.**
+5b. **All-duplicate check:** If every non-title-skipped card on the current page was a duplicate (already in CSV or cache) — i.e. zero new JDs were extracted and scored — automatically advance to the next page rather than stopping. Click the "Next" pagination link at the bottom of the results using `javascript_tool`:
 ```js
 const next = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.trim() === 'Next');
 if (next) { next.click(); 'clicked' } else { 'not found' }
@@ -291,7 +261,7 @@ Wait 3s for the new page to load, then restart from Step 2 on the new set of car
 
 **Do not navigate away from the search results page between cards.** Clicking a card updates the right panel in-place — the left card list remains intact and the next card can be clicked immediately after extraction.
 
-Log inline progress: `✓ [Company] — [Title] (ID: [jobId]) → JD extracted` / `↩️ [Company] — [Title] → cached, skipping` / `⚠️ [Company] — [Title] → ID mismatch or JD not retrieved`
+Log inline progress: `✓ [Company] — [Title] (ID: [jobId]) → JD extracted` / `↩️ [Company] — [Title] → CSV dedup, skipping` / `⚠️ [Company] — [Title] → ID mismatch or JD not retrieved`
 
 ---
 
@@ -314,7 +284,7 @@ For every listing that was scored by the filter:
 - `Status`: `pending` if ≥6/10; `skipped` if below 6/10.
 - `Filter_Score`: the /10 score. Leave blank if JD was not retrieved.
 - `Top_Skills`: top 3 skills most emphasized in the JD, comma-separated (e.g. `dbt, Snowflake, SQL`). Leave blank if JD was not retrieved.
-- `Posting_URL`: canonical LinkedIn URL (`https://www.linkedin.com/jobs/view/[jobId]/`); blank if job ID not extractable.
+- `Posting_URL`: canonical LinkedIn URL (`https://www.linkedin.com/jobs/view/[jobId]/`). **Required for any card that was scored by the filter** — the URL is the dedup key that prevents re-scoring on future runs. Leave blank only for cards that were hard-blocked before scoring (age-skip, title-skip, location-skip) — those don't need a URL since the block fires before the card is clicked.
 - `Notes`: skip reason for below-threshold rows (e.g. "Filter score 4/10 — seniority mismatch"); blank for ≥6/10.
 - `Source`: `scout-link`
 - `Work_Type`: from card metadata (Remote / Hybrid / On-site).
@@ -322,29 +292,29 @@ For every listing that was scored by the filter:
 
 For ⚠️ Unverified listings (JD not retrieved): log with status `pending`, blank `Filter_Score`, blank `Top_Skills`, and Notes: `"⚠️ Unverified — JD not retrieved"`.
 
-For `⛔ age-skip` / `⛔ title-skip` / `⛔ location-skip` cards: log with status `skipped`, blank scores, Notes: `"card-skipped — [age-skip / title-skip / location-skip]"`.
+For `⛔ age-skip` / `⛔ title-skip` / `⛔ location-skip` cards: do **not** log to `jobs.csv`. Write to the card-skip cache in `scout-cache.md` instead (see Step 7).
 
 ---
 
-## Step 7 — Update Memory
+## Step 7 — Update Card-Skip Cache
 
-Write to `scout-cache.md` only. Skip Dead/Hard-Excluded URL caches (those are open-search only).
+Write all hard-blocked cards (age-skip, title-skip, location-skip) from this run to the `### scout-link card skips` section of `.claude/memory/scout-cache.md`. Prepend new entries — do not overwrite existing ones.
 
-**Verified Postings Cache** (`## Verified Postings Cache`):
-
-| Company | Role | URL | Source | Status | Filter Score | Cached | Search Terms |
-
-- Append new rows; update existing rows on re-verification (match on URL); never delete rows.
-- `Search Terms`: leave blank for scout-link.
-- ✅ Verified: URL + score + date. ⚠️ Unverified: date, re-attempted next run.
-
-**Scout Cache** (`## Scout Cache`) — prepend a new entry; never overwrite:
-
+**Format:** one row per card:
 ```
-### Run: [YYYY-MM-DD] | Mode: LinkedIn (scout-link / [top-applicant|preferences]) | Cards found: [N] | Card-skipped: [N] | Cached (deduped): [N] | JD retrieved: [N] | JD failed: [N]
-Live results (Canada-eligible): [N] | Below threshold: [N] | Eligible (≥14): [N]
-Notes: [any navigation issues, login state, section not found, etc.]
+| [YYYY-MM-DD] | [Company] | [Title] | [age-skip / title-skip / location-skip] |
 ```
+
+**Table header** (add once if the section doesn't exist yet):
+```
+### scout-link card skips
+| Date | Company | Title | Reason |
+|------|---------|-------|--------|
+```
+
+**Pruning:** At the start of each scout-link run, remove any rows in this section older than 60 days before writing new entries.
+
+**Dedup check (Step 4, Step 5):** Before checking the CSV, check this cache. If the card's company + title appears in the cache with a date within the last 60 days → drop silently, do not click, do not score. This prevents re-processing cards that were already hard-blocked on a prior run.
 
 ---
 
@@ -365,13 +335,14 @@ Ranked by: Filter Score
 
 Show all 25 cards regardless of score. Sort by Filter Score descending. Card-skipped rows (`⛔`) and JD-failed rows (`⚠️`) sorted to the bottom after all scored rows.
 
-| # | Company | Role | Filter Score | Match Score | Gaps | URL |
-|---|---------|------|--------------|-------------|------|-----|
-| 1 | [Company] | [Title] | 🟢 9/10 | 78 — Good odds | [top 2–3 gaps or —] | [link] |
+| # | Company | Role | Filter Score | Note | Match Score | Gaps | URL |
+|---|---------|------|--------------|------|-------------|------|-----|
+| 1 | [Company] | [Title] | 🟢 9/10 | [1–2 phrase reason for score] | 78 — Good odds | [top 2–3 gaps or —] | [link] |
 
 **Table rules:**
 - Always include the direct posting URL as a markdown hyperlink (`https://www.linkedin.com/jobs/view/[jobId]/`)
 - ⚠️ Unverified results shown but noted
+- Note: always populate — 1–2 phrases explaining the Filter Score for every row (e.g. "Exact title match; all required tools present", "Good role fit; missing dbt", "Title mismatch — PM role", "Requires secret clearance")
 - Match Score: blank if auto job-match did not run (e.g. ⚠️ Unverified, card-skipped, or below threshold)
 - Gaps: top 2–3 gaps from Block B of job-match; `—` if job-match did not run
 - Score colour: 🟢 9–10 | 🟡 7–8 | 🟠 6 | 🔴 below 6
@@ -394,6 +365,45 @@ Skip:         [N] roles scored below 6/10
 
 ─────────────────────────────────────────
 ```
+
+**Dismiss confirmation:** After the summary block, output the full `DISMISS_QUEUE` as a table and ask for confirmation before dismissing anything:
+
+```
+─────────────────────────────────────────
+🗑️ Cards queued for dismissal ([N] total)
+These will be dismissed from LinkedIn recommendations once confirmed.
+
+| # | Company | Title | Reason |
+|---|---------|-------|--------|
+| 1 | [Company] | [Title] | [title-skip / age-skip / location-skip] |
+...
+
+Dismiss all? (yes / no / edit list)
+─────────────────────────────────────────
+```
+
+On **yes**: execute the dismiss clicks for every card in the queue using the JS snippet below, one at a time. Log `✓ dismissed` or `⚠️ not found` per card. On **no**: skip all dismissals. On **edit list**: show the list again and let the user specify which numbers to keep or remove, then confirm again.
+
+**Dismiss JS** (run once per card — replace `[Job Title]` and `[Company]` with exact strings):
+```js
+// Use aria-label*= (contains) — LinkedIn adds trailing spaces to aria-labels.
+// Always verify BOTH title AND company in the same ancestor before clicking.
+const allBtns = Array.from(document.querySelectorAll('button[aria-label*="Dismiss [Job Title]"]'));
+let dismissed = 'not found';
+for (const btn of allBtns) {
+  let el = btn;
+  for (let i = 0; i < 12; i++) {
+    el = el.parentElement;
+    if (!el) break;
+    if (el.textContent.includes('[Job Title]') && el.textContent.includes('[Company]')) {
+      btn.click(); dismissed = 'dismissed'; break;
+    }
+  }
+  if (dismissed === 'dismissed') break;
+}
+dismissed
+```
+Replace `[Job Title]` and `[Company]` with exact strings from Step 2. If `'not found'`, skip silently — do not let a failed dismiss block the run. **Never dismiss a card without confirming both the job title AND company name are present in the same DOM ancestor.**
 
 ---
 

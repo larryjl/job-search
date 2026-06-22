@@ -26,13 +26,15 @@ Read the full contents of `skills/scout-adzuna/adzuna-queue-batch.md` — this i
 
 Wait for the sub-agent to return its status line:
 ```
-BATCH DONE. Processed: [N] | Passed threshold: [N] | Queue remaining: [N]
+BATCH DONE. Processed: [N] | Passed threshold: [N] | Queue remaining: [N] | Title-skipped: [Company — Title, ...]
 ```
 
 Log the result inline:
 ```
 ✅ Batch [#]: [status line]
 ```
+
+Accumulate the `Title-skipped` entries from all batches into a session-level list (deduplicated by Company — Title).
 
 Then:
 - If `QUEUE EMPTY` in status → stop, output final summary
@@ -51,6 +53,15 @@ Total processed: [N]
 Total passed threshold (≥6/10): [N]
 Queue remaining: [N]
 ─────────────────────────────────────────
+```
+
+If any title-skipped entries were accumulated across batches, append immediately after the block:
+
+```
+🚫 Skipped by title ([N] total):
+  • [Company] — [Title]
+  • [Company] — [Title]
+  ...
 ```
 
 If stopped early due to cap: append `⚠️ Stopped early — session cap reached. Re-run /scout-adzuna drain to continue.`
@@ -77,11 +88,13 @@ Ranked by: Match Score (Filter Score where Match Score unavailable)
 ─────────────────────────────────────────
 ```
 
-| # | Company | Role | Filter Score | Match Score | Location | Comp | URL |
-|---|---------|------|--------------|-------------|----------|------|-----|
-| 1 | [Company] | [Title] | 🟢 9/10 | 76 | [Location] | [Salary or Not posted] | [link] |
+| # | Company | Role | Filter Score | Match Score | Location | URL |
+|---|---------|------|--------------|-------------|----------|-----|
+| 1 | [Company] | [Title] | 🟢 9/10 | 76 | [City, Province / Remote / Hybrid — confirmed only] | [link] |
 
 **Sorting:** Match Score descending; ties broken by Filter Score descending; then location preference (Calgary first, Remote second, On-site last). ⚠️ Unverified rows appear at the bottom regardless of score.
+
+**Location rules:** Show city/province from the JD. Include work model (Remote / Hybrid / On-site) **only if explicitly stated in the JD**. Do not infer from city name alone. If unconfirmed, show city/province only (e.g. "Fredericton, NB" — not "Fredericton, NB (remote unconfirmed)").
 
 **Score colour (Filter Score):** 🟢 9–10 | 🟡 7–8 | 🟠 6 | 🔴 below 6
 
