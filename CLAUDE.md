@@ -104,7 +104,7 @@ Map natural language to skills without asking confirmation. The skill file defin
 ```
 job-outputs/postings/        [Company]_[Role]_[YYYY-MM-DD].pdf
 job-outputs/resumes/         resume_[Company]_[Role]_[YYYY-MM-DD].docx / .pdf
-job-outputs/cover-letters/   cover_letter_[Company]_[Role]_[YYYY-MM-DD].docx
+job-outputs/cover-letters/   cover_[Company]_[Role]_[YYYY-MM-DD].docx
 job-outputs/matrices/        matrix_[Company]_[Role]_[YYYY-MM-DD].docx
 job-outputs/reports/         match_report_[Company]_[Role]_[YYYY-MM-DD].md  (quick mode)
                              match_report_[Company]_[Role]_[YYYY-MM-DD].docx (full mode)

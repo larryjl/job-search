@@ -13,7 +13,7 @@ Output format: `.pdf` if user says "pdf", `.docx` otherwise (default).
 
 ## Step 2 — Analyse Silently
 
-**Company signals:** name, industry, size, JD tone (formal/casual/values-driven), cultural keywords
+**Company signals:** name, industry, size, JD tone (formal/casual/values-driven), cultural keywords. Identify one verifiable specific — a product, initiative, recent news item, or stated mission detail — to anchor the opening sentence.
 
 **Role signals:** exact title, seniority, top 3 responsibilities (by emphasis + repetition)
 
@@ -30,16 +30,26 @@ Output format: `.pdf` if user says "pdf", `.docx` otherwise (default).
 **Structure — 3 paragraphs, max 250 words total:**
 
 *Opening (2–3 sentences):*
-- Name the primary problem this role is hired to solve, then connect the candidate's background to it directly
-- Never: "I am writing to...", "I am excited to...", "Please find attached...", "With X years of experience..."
-- Do: problem → candidate's direct relevance. Start in the middle of the story.
+- Lead with a specific achievement from the candidate's background, then connect it to the primary problem this role is hired to solve
+- Never: "I am writing to...", "I am excited to...", "Please find attached...", "With X years of experience...", "I am applying for the [X] position..."
+- Do: achievement → problem → candidate's direct relevance. Start in the middle of the story.
+- Anchor to the company-specific detail identified in Step 2 — a product, initiative, or mission detail. Do not open with a generic company compliment.
 - Include 1–2 ATS keywords naturally
 
 *Middle (proof — the one best story):*
 - Tell ONE specific story from the candidate's experience that demonstrates they have solved this problem before
 - Concrete situation + action + outcome. Numbers where they exist.
+- Close the paragraph with one sentence connecting the outcome back to the role's core problem — make the bridge explicit.
 - 3–5 sentences. No bullet points. No second story diluting the first.
 - Include 2–3 ATS keywords woven into the narrative
+
+*Requirements match list (optional — after middle paragraph):*
+- Include only when the candidate has a very strong, direct match to 3–4 explicitly stated requirements from the JD. "Very strong" means the resume shows clear, specific evidence for each item — not adjacent experience or transferable skills.
+- If the match is imperfect on any item, omit the list entirely. Do not force it.
+- Format: one natural lead-in sentence closing out the middle paragraph's bridge, then a short bulleted list (3–4 items max).
+- Each bullet: one line — the JD's requirement phrasing on the left, the candidate's specific evidence on the right, separated by a colon. Keep it tight; no full sentences.
+- Example lead-in: "The core requirements map directly to my background:" followed by bullets.
+- Do not use a table. Plain bullets only.
 
 *Closing (2–3 sentences max):*
 - What the candidate would focus on in the first 60–90 days, specific to this role
@@ -143,6 +153,8 @@ Formatting constraints still apply: max 1 page, 11pt minimum, 250-word body cap.
 💡 ATS keywords used: [comma-separated list]
 📏 Word count: [N] words
 
+⚠️ Verify before sending: [list any framing that falls in the "flag it" zone from the Interview Backtrack Test — what was claimed, why it's a stretch, what to confirm. Omit this line entirely if nothing was flagged.]
+
 Want adjustments? "sharpen the opening" / "tighten the story" / "different example" / "generate matching resume"
 ```
 
@@ -150,6 +162,6 @@ Want adjustments? "sharpen the opening" / "tighten the story" / "different examp
 
 - Never output letter as plain text in chat — file is the deliverable
 - Never use filler openers; never use "To Whom It May Concern"
-- Filename: `cover_letter_[Company]_[Role]_[YYYY-MM-DD].docx`
+- Filename: `cover_[Company]_[Role]_[YYYY-MM-DD].docx`
 - No tables, skills sections, or elements not in the structure above
 - Hard cap: 250 words body text (excludes header, salutation, sign-off). If over, cut — never shrink font.

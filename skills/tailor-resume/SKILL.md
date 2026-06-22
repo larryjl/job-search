@@ -20,7 +20,7 @@ In review mode:
    - If the user named a file (e.g., "the Telus resume") or gave a company/role: glob `job-outputs/resumes/` case-insensitively to find the matching `.docx`, then extract its text with python-docx
 2. **Resolve the JD:** follow Step 0a exactly — check `jobs.csv` → `Posting_File`, then glob `job-outputs/postings/`, then fall back to a user-supplied URL or pasted text. Never search the web for the posting.
 3. **Skip to Step 4.5** (Reviewer Agent) — pass the resolved resume text as `[INSERT FULL RESUME TEXT]`
-4. After the reviewer returns, apply feedback (same rules as draft mode Step 4.5), then continue from **Step 5** onward (preview → confirm → generate files → post-save)
+4. After the reviewer returns, apply feedback (same rules as draft mode Step 4.5), then continue from **Step 6** onward (strategic recommendations → generate files → post-save)
 
 ---
 
@@ -155,19 +155,11 @@ Once the reviewer returns its feedback, apply each item using judgment:
 - Tone and voice: fix per writing-style.md rules
 - Bullet strength: rewrite or cut low-signal bullets as suggested
 
-The revised draft is what gets shown in the preview. Never show the preview before
-the reviewer pass is complete.
+The revised draft is what gets generated in Step 7. Never generate files before the reviewer pass is complete.
 
 ## Step 5 — Preview
 
-Show full plain-text preview in a code block with all formatting rules applied (bold for headings/credentials, proper spacing). Do not ask for confirmation here — proceed immediately to Step 6.
-
-**Formatting rules to apply in preview:**
-- Section headings in CAPS
-- Company/date on one line (use tab spacing visually: `Company, Location` [TAB] `Date Range`)
-- Professional Development: bold credentials with blank lines between items (see Step 3 example)
-- Bold all role titles and credential names
-- Preserve bullet structure exactly as it will appear in the final document
+~~Skip — do not show preview. Proceed immediately to Step 6.~~
 
 ## Step 6 — Strategic Recommendations
 

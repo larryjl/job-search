@@ -65,14 +65,30 @@ def load_content(content_file):
 
 
 def convert_to_pdf(docx_path, output_dir):
-    result = subprocess.run(
-        ["soffice", "--headless", "--convert-to", "pdf", docx_path, "--outdir", output_dir],
-        capture_output=True, text=True, timeout=60,
-    )
-    if result.returncode != 0:
-        return None
-    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
-    return pdf_path if os.path.exists(pdf_path) else None
+    """Convert docx to PDF using soffice. Returns pdf_path or None.
+
+    soffice writes temp/lock files alongside the output. To keep those out of
+    the cover-letters folder, we convert into /tmp and move only the final .pdf over.
+    """
+    import shutil
+    import tempfile
+
+    tmp_dir = tempfile.mkdtemp(prefix="cover_pdf_")
+    try:
+        result = subprocess.run(
+            ["soffice", "--headless", "--convert-to", "pdf", docx_path, "--outdir", tmp_dir],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return None
+        tmp_pdf = os.path.join(tmp_dir, os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
+        if not os.path.exists(tmp_pdf):
+            return None
+        dest_pdf = os.path.join(output_dir, os.path.basename(tmp_pdf))
+        shutil.move(tmp_pdf, dest_pdf)
+        return dest_pdf
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def read_contact_line_from_resume(project_root):
@@ -168,7 +184,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     today     = date.today().strftime("%Y-%m-%d")
-    filename  = f"cover_letter_{args.company}_{args.role}_{today}"
+    filename  = f"cover_{args.company}_{args.role}_{today}"
     docx_path = os.path.join(output_dir, filename + ".docx")
     pdf_path  = os.path.join(output_dir, filename + ".pdf")
 

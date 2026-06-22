@@ -308,13 +308,24 @@ All three checks must pass. Any failure → mark ⚠️ Unverified, skip filter,
 
 All three must pass to proceed. A listing that passes all three is considered a **verified full JD** and may be scored.
 
+**Per-company threshold overrides:** Before applying the default ≥6/10 pass threshold, check the company's entry in `profile/target-companies.md` for a `Threshold:` override line. If present, use that threshold instead of the default for this company only. (Example: Alberta Health Services has a ≥5/10 filter and ≥50/100 match threshold due to a referral contact.)
+
 Run the filter (`skills/filter/SKILL.md`) on each listing that passes the validation gate.
 
 ---
 
 ## Step 6 — Auto Quick Job-Match
 
-For every listing that scored **≥6/10** in Step 5, immediately run job-match-quick before moving to the next listing.
+**This step is mandatory for every qualifying listing — no exceptions based on rank, score, or perceived priority.**
+
+For every listing that scored **≥6/10** in Step 5, immediately run job-match-quick before moving to the next listing. Do not batch or defer. Do not skip lower-ranked listings because a higher-ranked one already ran. Process each qualifying listing in order, one at a time, before continuing.
+
+**Enforcement checklist — run before proceeding to Step 7:**
+After all listings are processed, explicitly verify:
+1. Count listings with Filter_Score ≥ 6 from this run's results
+2. Count listings where Match_Score was written to `jobs.csv` this session
+3. If count (2) < count (1): identify the gap and run auto job-match for any missing listing now before continuing
+4. Only proceed to Step 7 when both counts are equal (excluding ⚠️ Unverified and already-applied listings)
 
 **How to run:**
 - Use the JD already extracted in this session — do not re-fetch
@@ -339,7 +350,7 @@ Recommendation: [one sentence]
 
 **Session continuity:** Auto job-match is session-local — the JD text must be available in the current context window. If the run spans multiple sessions (e.g. context compaction occurred mid-sweep), auto job-match for earlier listings may not have run. At the start of Step 6, check: for any listing scored ≥6/10 that does not yet have a Match_Score in `jobs.csv`, run auto job-match now using the JD URL from the CSV row (re-fetch if needed). Note any catch-up matches in the scout-cache run entry.
 
-**After all listings are processed**, continue to Step 7 as normal. The ranked table in Step 9 should include the Match Score and Gaps for any listing where auto job-match ran:
+**After all listings are processed and the enforcement checklist is satisfied**, continue to Step 7. The ranked table in Step 9 must include the Match Score and Gaps for every listing where auto job-match ran:
 
 | # | Company | Role | Filter Score | Note | Match Score | Gaps | URL |
 |---|---------|------|--------------|------|-------------|------|-----|

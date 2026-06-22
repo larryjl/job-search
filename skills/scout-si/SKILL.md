@@ -34,11 +34,49 @@ Keep these in working memory throughout — you'll use them for every job.
 
 ---
 
+## Phase 0 — Auto-Login
+
+Run this phase before navigating to the job search page. If already logged in, skip to Phase 1.
+
+1. Call `tabs_context_mcp` (createIfEmpty: true) to get a tab ID.
+2. `navigate` to `https://portal.sisystems.com` and wait 3 seconds for Angular to load.
+3. Call `read_page` to check login state:
+   - If your name is visible in the header → already logged in, skip to Phase 1.
+   - If a login/email form is present → proceed with steps below.
+
+### Step 0.1: Enter Email
+
+Use `find` to locate the email input field, then `form_input` to fill it with the account email address. Use `find` to locate the "Next" or "Sign in" button and click it. Wait 3 seconds.
+
+### Step 0.2: Enter Password (if prompted)
+
+If a password field appears: use `find` + `form_input` to fill it, then click the submit button. Wait 3 seconds.
+
+### Step 0.3: Handle Verification Code (if prompted)
+
+If a verification code entry field appears (MSAL / Microsoft email verification step):
+
+1. **Search Gmail** using `mcp__c403b25a-b59b-4370-997a-b95459ce1c1c__search_threads` with query:
+   ```
+   from:msonlineservicesteam@microsoftonline.com subject:"S.i. Systems account email verification code" newer_than:5m
+   ```
+2. If no thread found, wait 5 seconds and retry once. If still nothing, tell the user: "Verification email not found in Gmail — please enter the code manually and let me know when done."
+3. If a thread is found, call `get_thread` with the thread ID (use `FULL_CONTENT` format) and extract the numeric verification code using regex: look for a 6–8 digit number in the email body.
+4. Use `find` to locate the verification code input field, then `form_input` to enter the code. Click the submit/verify button.
+5. Wait 3 seconds, then call `read_page` to confirm login succeeded (your name visible in header).
+6. If login failed, tell the user: "Login failed after entering the verification code — please check the portal and let me know when you're logged in."
+
+### Step 0.4: Mid-Run Re-Login
+
+If the portal redirects to a login page mid-run (MSAL token expiry), run Phase 0 again from Step 0.1. Resume from the card you were processing once login is confirmed.
+
+---
+
 ## Phase 1 — Navigate to Search Results
 
 1. Call `tabs_context_mcp` (createIfEmpty: true) to get a tab ID.
 2. `navigate` to: `https://portal.sisystems.com/#/portal/jobs/searchJobs`
-3. Wait 2 seconds for Angular to load, then call `read_page` to confirm you're logged in (your name visible in header). If not, stop and tell the user to log in first.
+3. Wait 2 seconds for Angular to load, then call `read_page` to confirm you're logged in (your name visible in header). If not, run Phase 0.
 4. Note the total result count from `read_page` (e.g. "Your 40 results are in"). This is your working set. **Never touch the filters** — they are always pre-set correctly. Do not read, check, adjust, or re-search based on filters.
 6. **Build the seen-ID set:** Read `job-outputs/jobs.csv` and extract all `Job_ID` values where `Source = SI Systems portal` and `Status` is `applied` or `skipped`. Store this as your dedup set for the run.
 
