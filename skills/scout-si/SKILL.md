@@ -250,10 +250,10 @@ After completing all cards (or reaching a session cap), produce a run summary:
 ```
 
 Then update `job-outputs/jobs.csv` for every job processed:
-- Applied jobs: status = `applied`, populate Filter_Score, Top_Skills, Match_Score, Match_Label, Posting_URL, Work_Type, Contract_Length, Source = `SI Systems portal`, Job_ID = numeric job ID from the portal
-- Skipped jobs (scored): status = `skipped`, populate Filter_Score, Top_Skills, Posting_URL, reason in Notes, Job_ID
-- Skipped jobs (borderline long shot, 55–59): status = `skipped`, Notes = "Borderline long shot: [score]", Job_ID
-- Hard-blocked: status = `skipped`, Notes = "Hard-blocked: [reason]", Job_ID
+- Applied jobs: status = `applied`, populate Filter_Score, Top_Skills, Match_Score, Match_Label, Posting_URL, Work_Type, Contract_Length, Source = `SI Systems portal`, Job_ID = numeric job ID from the portal; leave Redirect_URL, Search_Terms, Contacted blank
+- Skipped jobs (scored): status = `skipped`, populate Filter_Score, Top_Skills, Posting_URL, reason in Notes, Job_ID; leave Redirect_URL, Search_Terms, Contacted blank
+- Skipped jobs (borderline long shot, 55–59): status = `skipped`, Notes = "Borderline long shot: [score]", Job_ID; leave Redirect_URL, Search_Terms, Contacted blank
+- Hard-blocked: status = `skipped`, Notes = "Hard-blocked: [reason]", Job_ID; leave Redirect_URL, Search_Terms, Contacted blank
 - Already-seen (dedup): do not add a new row — the existing row already has the Job_ID logged
 
 ---

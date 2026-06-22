@@ -29,7 +29,7 @@ Silently load before any searching:
 **C. Scout cache** (`/scout-company`, `/scout-ats`):
 Read `scout-cache.md` before any searching begins.
 - `/scout-company`: last run < 3 days ago AND current company list is a subset of last run → ask: "Last scout ran [N days] ago. Use cache or run fresh? (cache / fresh)". Current run includes new companies → run fresh for new ones; use cache for overlapping. No prompt. 3+ days ago → run fresh automatically.
-- `/scout-ats`: use the Verified Postings Cache and Dead/Hard-Excluded caches for dedup at Step O2 — drop any URL already present. No cache-age prompt; always run fresh.
+- `/scout-ats`: use jobs.csv and the Hard-Excluded URL Cache for dedup at Step O2. No cache-age prompt; always run fresh.
 
 ---
 
@@ -114,9 +114,9 @@ Run the full detection sequence from **`ats-auto-detection.md`** in this skill f
 
 Route to ats-api if Greenhouse/Lever/Ashby; escalate to browser-only otherwise.
 
-**A4 — Save posting URLs to cache**
+**A4 — Dedup against jobs.csv**
 
-For every company with live postings, write to `## Verified Postings Cache` in `scout-cache.md`: title, URL, source `company-scout`, status ✅ API-verified, date. Deduplicate on full URL. Zero-match companies → update `profile/target-companies.md`: Last Checked = today, Re-check After = today + 3 days.
+For every posting URL found, check `job-outputs/jobs.csv` `Posting_URL` column (case-insensitive exact match) — skip silently if already tracked. Zero-match companies → update `profile/target-companies.md`: Last Checked = today, Re-check After = today + 3 days.
 
 **A5 — Record new ATS discoveries**
 
@@ -146,15 +146,14 @@ site:jobs.ashbyhq.com "data analyst" OR "data engineer" OR "analytics engineer" 
 
 Collect all results. Deduplicate on exact URL. Announce: `📥 [N] URLs found.`
 
-**O2 — Dedup against scout-cache.md**
+**O2 — Dedup against jobs.csv and scout-cache.md**
 
-For each URL, check three caches in `scout-cache.md`:
+For each URL, check:
 
-1. **Verified Postings Cache** — exact URL match → skip; announce count skipped
-2. **Dead URL Cache** (`## Dead URL Cache (Open Search)`) — exact URL match → skip silently
-3. **Hard-Excluded URL Cache** (`## Hard-Excluded URL Cache (Open Search)`) — exact URL match + TTL not expired → skip silently; TTL expired → re-verify
+1. **`job-outputs/jobs.csv` `Posting_URL` column** — exact URL match (case-insensitive) → skip silently
+2. **Hard-Excluded URL Cache** (`## Hard-Excluded URL Cache (Open Search)` in `scout-cache.md`) — exact URL match + TTL not expired → skip silently; TTL expired → re-verify
 
-Write-back after run: dead URLs → Dead URL Cache with today's date; live-but-excluded → Hard-Excluded URL Cache with today's date and 30-day TTL.
+Write-back after run: live-but-excluded → Hard-Excluded URL Cache with today's date and 30-day TTL.
 
 **O3 — Pre-Chrome Location Filter**
 
@@ -182,10 +181,8 @@ For each open search URL that passed deduplication and Step 3:
 3. `get_page_text`
 4. Classify liveness:
 - ✅ Live — posting page loaded with recognisable content; proceed to Step 5 JD validation gate before scoring
-- ❌ Dead — 404 or closure language → drop; add to Dead URL Cache
+- ❌ Dead — 404 or closure language → drop; write a `closed` row to `job-outputs/jobs.csv` with the URL, company, role, source `job-scout`, and today's date. Leave `Contract_Length`, `Search_Terms`, and all other columns blank. Skip if a row already exists for that URL.
 - ⚠️ Unverified — blocked or no recognisable content → include with flag; will fail JD validation gate at Step 5
-
-Write verified open postings to `## Verified Postings Cache` with source `job-scout`.
 
 ------
 
@@ -235,6 +232,8 @@ Try in order for extraction: `get_page_text` → `find` with data role query →
 **PeopleSoft / new-tab portals:** Some portals (e.g. City of Calgary, `calgary.ca/careers.html`) list jobs as plain HTML links that open the JD in a new PeopleSoft tab (`recruiting.[domain].ca/psc/...?SiteId=X&JobOpeningId=Y`). **Privacy filter warning:** `getAttribute('href')` on these links returns `[BLOCKED: Cookie/query string data]` — do NOT try to read the href. Instead: (1) navigate to the listings page, (2) use `find` tool to locate the job title link by text and `left_click` its ref — PeopleSoft opens in a new tab automatically, (3) call `get_page_text` on the new tab to extract the full JD (Job ID is in the URL as `JobOpeningId=XXXXXX`), (4) close the PeopleSoft tab, (5) return to listings tab and repeat. Re-run `tabs_context_mcp` after each close to get the refreshed tab ID. Do NOT attempt to navigate directly to the PeopleSoft portal root.
 
 **B5 — Record portal details:** Update `profile/target-companies.md` ATS column, Careers URL, and Notes with portal type and quirks.
+
+**Dead postings (browser-only path):** If a posting page shows closed/expired/404 state, write a `closed` row to `job-outputs/jobs.csv` with the URL, company, role, source `job-scout`, and today's date. Leave `Contract_Length`, `Search_Terms`, and all other columns blank. Skip if a row already exists for that URL.
 
 Progress format: `✓ City of Calgary (PeopleSoft) — 1 data role found` / `— Health Quality Alberta: no current openings` / `⚠️ WCB: domain permission denied; screenshot only`
 
@@ -361,6 +360,7 @@ For every listing that was scored by the filter:
   - scout-ats
   - scout-company
   - paste-batch
+  - Note: scout-link and scout-indeed write their own CSV rows per their own skill files (see `skills/scout-link/SKILL.md` Step 6 and `skills/scout-indeed/SKILL.md` Step 7).
 
 For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, blank Top_Skills, and Notes: `"⚠️ Unverified — JD not retrieved"`.
 
@@ -368,9 +368,10 @@ For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, b
 
 ## Step 8 — Update Memory
 
-`/paste-batch` — skip A and B (Dead/Hard-Excluded caches). Write only scored rows to Verified Postings Cache.
-`/scout-ats` — skip A. Write B (Verified Postings Cache + Dead/Hard-Excluded caches) and a Scout Cache run entry.
+`/paste-batch` — skip A and B.
+`/scout-ats` — skip A. Write B (Hard-Excluded URL Cache + Scout Cache run entry).
 `/scout-link` — handled entirely by `skills/scout-link/SKILL.md`.
+`/scout-indeed` — handled entirely by `skills/scout-indeed/SKILL.md`.
 
 **A. `profile/target-companies.md`** (company-scout and named runs only):
 - Every company swept: update Last Checked (today), ATS platform, Careers URL if changed
@@ -381,17 +382,8 @@ For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, b
 
 **B. `scout-cache.md`:**
 
-**Verified Postings Cache** (`## Verified Postings Cache`) — all modes:
-
-| Company | Role | URL | Source | Status | Filter Score | Cached | Search Terms |
-
-- Append new rows; update existing rows on re-verification (match on URL); never delete rows
-- ✅ Verified: URL + score + date. ❌ Dead: Dead status + date. ⚠️ Unverified: date, re-attempted next run.
-- `Search Terms`: leave blank for all job-scout modes. Populated by `/scout-adzuna` (see `skills/scout-adzuna/SKILL.md`).
-
-**Dead URL / Hard-Excluded URL Caches** (open search only):
-- Dead URLs confirmed this run → `## Dead URL Cache (Open Search)`
-- Live but hard-excluded URLs → `## Hard-Excluded URL Cache (Open Search)` with 30-day TTL
+**Hard-Excluded URL Cache** (`## Hard-Excluded URL Cache (Open Search)`) — open search only:
+- Live but hard-excluded URLs → append with today's date and 30-day TTL
 
 **Scout Cache** (`## Scout Cache`) — all modes except `/paste-batch`. Prepend a new entry; never overwrite:
 

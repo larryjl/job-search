@@ -36,7 +36,7 @@ corresponding match report exists in `job-outputs/reports/`:
 - Read the match report and extract the top 3 skills most emphasized in the JD
   (same logic as the filter skill uses at scout time).
 - Write the extracted skills back into the `Top_Skills` column for that row in
-  `jobs.csv`. Use comma-separated format (e.g. `dbt, Snowflake, SQL`).
+  `jobs.csv`. Use pipe-separated format (e.g. `dbt | Snowflake | SQL`).
 - Do this for all such rows before proceeding. This is a one-time repair that makes
   future runs faster.
 

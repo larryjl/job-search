@@ -191,7 +191,7 @@ Files persist across sessions. Never pre-fill — only write what was actually o
 profile/targets.md                   ← roles, location, salary, visa, company prefs
 profile/target-companies.md          ← ATS platform, careers URL, routing type, scout history per company
 .claude/memory/learnings.md          ← match patterns, feedback, compensation research, filter score overrides
-.claude/memory/scout-cache.md        ← job-scout only: scout cache, posting URL cache, company ATS index
+.claude/memory/scout-cache.md        ← all scout modes: scout run history, hard-excluded URL cache (open search), scout-link card-skip cache
 .claude/memory/company-ranking.md    ← company-scout only: ranked priority list (Tier 1–4 + Excluded); drives sweep order
 .claude/memory/interview-stories.md  ← curated STAR stories, refined post-mock-interview
 .claude/config/domains.md            ← approved web domains (guardrails)
@@ -211,7 +211,7 @@ profile/target-companies.md          ← ATS platform, careers URL, routing type
 | Event | File |
 |-------|------|
 | Human states/updates role, salary, location, visa, or company prefs | `profile/targets.md` |
-| job-scout completes | `scout-cache.md` — scout cache, posting URL cache, ATS index updates |
+| job-scout completes | `scout-cache.md` — scout run history; `jobs.csv` — all scored and dead rows |
 | job-match completes | `learnings.md` — company, role, score, decision, skill gaps |
 | job-comp completes | `learnings.md` — compensation research cache write-back |
 | Resume/cover letter feedback given | `learnings.md` |
@@ -219,7 +219,7 @@ profile/target-companies.md          ← ATS platform, careers URL, routing type
 | Mock interview debrief | `learnings.md` — weak areas, strong stories; `interview-stories.md` — update story feedback, status, refine wording |
 | Domain approved during skill run | `domains.md` — add to appropriate skill section |
 
-**Scout cache** (in `scout-cache.md`): Format varies by mode (scout-ats, scout-company, scout-adzuna, scout-link each use different fields). See the relevant skill's Step 8 for exact templates (`skills/job-scout/SKILL.md` for ats/company modes; `skills/scout-adzuna/SKILL.md` for adzuna mode). Each run is prepended as a new `### Run:` block — never overwrite previous entries.
+**Scout cache** (in `scout-cache.md`): Format varies by mode (scout-ats, scout-company, scout-adzuna, scout-link each use different fields). See the relevant skill's Step 8 for exact templates (`skills/job-scout/SKILL.md` for ats/company modes; `skills/scout-adzuna/SKILL.md` for adzuna mode; `skills/scout-indeed/SKILL.md` for indeed mode). Each run is prepended as a new `### Run:` block — never overwrite previous entries.
 
 **Compensation cache** (in `learnings.md`):
 ```
@@ -259,13 +259,14 @@ Tracker: `job-outputs/jobs.csv`
 **Format:** CSV with the following columns (in order):
 
 ```
-Company, Role, Date, Status, Resume_Used, Posting_File, Posting_URL, Filter_Score, Top_Skills, Match_Score, Match_Label, Posted_Comp, Market_Min_CAD, Market_Max_CAD, Work_Type, Contract_Length, Notes, Source, Job_ID, Contacted
+Company, Role, Date, Status, Resume_Used, Posting_File, Posting_URL, Redirect_URL, Filter_Score, Top_Skills, Match_Score, Match_Label, Posted_Comp, Market_Min_CAD, Market_Max_CAD, Work_Type, Contract_Length, Notes, Source, Job_ID, Contacted, Search_Terms
 ```
 
 **Column rules:**
 - `Resume_Used`: full resume filename **including the `.docx` extension** (e.g. `resume_telus_data-strategist_2026-05-06.docx`). Leave blank if no resume was generated for this row (e.g. `pending` or `ignored` status). The matching `.pdf` is implied — no need to record both. **When logging a scout-only row (no resume generated), `Resume_Used` must be blank and `Posting_File` must contain the posting filename — never put the posting filename in `Resume_Used`.**
 - `Posting_File`: full posting filename as saved in `job-outputs/postings/` (e.g. `coconut-software_senior-analytics-engineer_2026-05-21.pdf`). Populated by save-job-posting and auto-save. Leave blank if no posting file was saved. Used by skills to locate the JD file directly without globbing.
 - `Posting_URL`: canonical posting URL (ATS or company careers page URL — not an Adzuna redirect). Populated by job-scout (all modes except paste-batch), save-job-posting, and any skill that has a verified posting URL. Leave blank for paste-batch rows where no URL exists. Used as the primary deduplication key — checked at the earliest point per mode before scoring runs.
+- `Redirect_URL`: raw Adzuna redirect URL (`adzuna.ca/details/...` or `adzuna.ca/land/...`). Populated by scout-adzuna only; blank for all other sources. Used for pre-Chrome dedup — checked at Step 3a before any Chrome calls are spent.
 - `Filter_Score`: Filter Score — integer out of 10 from `skills/filter/SKILL.md` (e.g. `7`). Populated whenever the filter is run — including job-scout, paste-batch, and before any /job-match. Leave blank if filter was not run. Never convert to /100 or use as a substitute for Match_Score.
 - `Top_Skills`: top 3 skills most emphasized in the JD, extracted during filter scoring. Pipe-separated (e.g. `dbt | Snowflake | SQL`). Populated by job-scout and paste-batch when the filter runs. Leave blank if JD was not retrieved (⚠️ Unverified) or filter was not run.
 - `Match_Score`: numeric integer out of 100 from the 7-dimension rubric, no units (e.g. `76` not `76/100`). Populated only when `/job-match` runs. Leave blank otherwise. **Never populate this field from a Filter Score.**
@@ -273,11 +274,12 @@ Company, Role, Date, Status, Resume_Used, Posting_File, Posting_URL, Filter_Scor
 - `Posted_Comp`: posted salary or rate from the job listing, as-is (e.g. `80000-100000 CAD`, `110-120/hr CAD`). Leave blank if not posted.
 - `Market_Min_CAD` / `Market_Max_CAD`: research-based market salary range in CAD integers, populated by `/job-comp`. Convert hourly to annual where needed (hourly × 2080). Leave blank if `/job-comp` has not been run.
 - `Work_Type`: `Remote`, `Hybrid`, `On-site`, or `Unknown`.
-- `Contract_Length`: `permanent` for permanent roles; duration string for contracts (e.g. `24 months`). Always fill this field.
+- `Contract_Length`: `permanent` for permanent roles; duration string for contracts (e.g. `24 months`). Always fill this field. Exception: `closed` rows written for dead postings (no JD retrieved) may leave this blank.
 - `Notes`: remaining strategic notes; semicolons as list separators. No match score or comp data here. Do NOT note location unless the role is remote outside Canada or hybrid outside Calgary. Do NOT note general observations about being a good fit (that belongs in `Match_Label`).
 - `Source`: where the posting was found (e.g. `Randstad (randstad.ca)`, `LinkedIn`, `Adzuna`, `direct (company careers page)`, `job-scout`, `paste-batch`). Leave blank if unknown.
 - `Job_ID`: source-system job identifier. Populated only for SI Systems portal rows (e.g. `152824`). Leave blank for all other sources. Used by scout-si for deduplication — before clicking DETAILS on any card, check if its Job_ID already exists in jobs.csv with status `applied` or `skipped`; if so, skip silently without opening the JD.
 - `Contacted`: pipe-separated list of names contacted via cold outreach for this role (e.g. `Elizabeth Carpenter | Andrew Smith`). Populated by the cold-outreach skill or manually. Leave blank if no outreach was done. Use pipes, not commas, to avoid CSV parsing errors.
+- `Search_Terms`: pipe-separated Adzuna search terms that returned this job ID (e.g. `data analyst | business analyst`). Populated by scout-adzuna only. Leave blank for all other sources.
 - Use empty string (no space) for blank fields. Do not use dashes.
 
 **Before job-match (both modes):** Check if company + role already tracked. If yes: "You've already applied to [Company] for [Role] on [Date] — status: [Status]. Run job-match again? (yes / skip)"

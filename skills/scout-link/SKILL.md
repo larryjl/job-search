@@ -1,6 +1,6 @@
 ---
 name: scout-link
-description: "Scrapes a live LinkedIn search results page via Chrome. Clicks each card, extracts the JD from the right panel, and produces a ranked output table. Requires Claude in Chrome and an active LinkedIn login. Processes one page at a time (25 cards); auto-advances if all cards are duplicates."
+description: "Scrapes a live LinkedIn search results page via Chrome. Harvests each card's job ID by clicking the card and reading the URL's currentJobId (the DOM no longer exposes IDs as attributes post-RSC-migration), then fetches JDs via the Voyager jobPostings API. Both clicking and the JD fetch work with the tab backgrounded, so it runs unattended. Produces a ranked output table. Requires Claude in Chrome and an active LinkedIn login. Processes one page at a time (25 cards); auto-advances if all cards are duplicates."
 ---
 
 # Scout Link
@@ -28,16 +28,15 @@ Silently load before starting:
 
 **Degraded render check (initial navigation only):** After navigating to the jobs page, confirm the page has loaded:
 - `document.body.innerText.length` must be > 3000 chars. If < 3000 → stop and output: `⚠️ LinkedIn page not fully loading (< 3000 chars). Re-run scout-link when LinkedIn renders normally.`
-- Right-panel render is checked per-card in Step 4 (step 6b) after the mandatory wait — do not check it here.
 
-**No workarounds.** Do not attempt alternative URL patterns, direct `/jobs/view/` navigation, `read_page`, `web_fetch`, or processing partial card metadata. Stop cleanly and let the user re-run.
+**No workarounds.** Do not attempt alternative URL patterns, `read_page`, `web_fetch`, or processing partial card metadata. Stop cleanly and let the user re-run.
 
 **Mode:** Default is `preferences`. Set `SCOUT_LINK_MODE = preferences` unless the user explicitly specifies `top-applicant` in their command. Do not prompt the user to choose.
 
 **URL input:**
 - No URL given, or `linkedin.com/jobs` given → navigate to `https://www.linkedin.com/jobs/`, wait 3s for render, then:
   - **Verify starting URL:** Confirm the current URL is `https://www.linkedin.com/jobs/` (or `linkedin.com/jobs/`). If it has resolved to a job posting URL (`/jobs/view/...`) or a search results URL, navigate back to `https://www.linkedin.com/jobs/` and wait again before proceeding.
-  - Both sections render asynchronously via JS and will not appear in page text immediately even if visible in the viewport. The 3s wait above is the primary render gate — do not call `get_page_text` before it completes. Scroll behaviour per section is handled in the branches below.
+  - Both sections render asynchronously via JS and will not appear in page text immediately even if visible in the viewport. The 3s wait above is the primary render gate — do not call `get_page_text` to verify section presence before it completes. Scroll behaviour per section is handled in the branches below.
   - Branch on `SCOUT_LINK_MODE`:
 
   **`top-applicant`:**
@@ -81,7 +80,7 @@ Silently load before starting:
     found || 'not found'
     ```
     Wait 3s for results to load.
-  - **Verify landing URL:** Confirm the URL has changed from `https://www.linkedin.com/jobs/` to a search results URL (any URL containing `/jobs/search/` or a `?` query string). If it has not changed, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to preferences results. Re-run scout-link when LinkedIn renders normally.`
+  - **Verify landing URL:** Confirm the URL has changed from `https://www.linkedin.com/jobs/` to a search results URL. Post-RSC-migration this is `/jobs/search-results/` (the old `/jobs/search/` path is no longer used); accept any URL containing `/jobs/search-results/`, `/jobs/search/`, or a `?` query string with `origin=PREFERENCES_LANDING`. If it has not changed, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to preferences results. Re-run scout-link when LinkedIn renders normally.`
 
 **Page offset (optional):** If the user specified a page number (e.g. "skip to page 3"), apply it after the full mode navigation above is complete and the search results URL is confirmed. Calculate the offset as `(N-1) * 25` and inject it into the current URL:
 ```js
@@ -101,33 +100,102 @@ and stop.
 
 ## Step 2 — Parse Job Card List
 
-Call `get_page_text` on the search results page. Parse the left-panel job list — each card appears as a block of:
-```
-[Title]
-[Company]
-[Location] ([Work Type])
-[Optional: salary, alumni info]
-[Status line: Viewed / Saved / Be an early applicant / etc.]
+> **LinkedIn RSC migration (verified 2026-06-21):** The job search results page is server-rendered via React Server Components. The card list no longer carries `data-occludable-job-id` (or any `data-job-id`) attributes, and the job IDs are not statically present in the DOM or anchor hrefs. Do not query `data-occludable-job-id` — it returns nothing. Each card IS a clickable `div[role="button"]`; **clicking a card updates the page URL's `currentJobId` parameter to that card's job ID**. We harvest IDs by clicking each card and reading `currentJobId` (Step 2b), then fetch the JD via the Voyager API (Step 4).
+>
+> **Unattended-safe (verified 2026-06-21):** The click-walk and the JD fetch both work when the tab is backgrounded/hidden (`document.hidden === true`). Clicking updates the URL (a DOM/history operation, not a throttled render) and the JD comes from an authenticated `fetch()`. Neither needs tab focus — this is what makes the scheduled run work unattended. Do NOT add tab-focus prompts or visibility workarounds.
+
+### Step 2a — Render and identify cards
+
+**Scroll to render all cards:** Scroll the results panel to force all cards to render, then return to the top. Use `javascript_tool`:
+```js
+const conts = Array.from(document.querySelectorAll('div, ul')).filter(el => el.scrollHeight > el.clientHeight + 200);
+conts.forEach(c => { c.scrollTop = c.scrollHeight; });
+await new Promise(r => setTimeout(r, 1000));
+conts.forEach(c => { c.scrollTop = 0; });
+'scrolled'
 ```
 
-Extract per card: `title`, `company`, `location`, `work_type` (On-site / Hybrid / Remote — infer from location string), `posted` (relative date string). Accept up to 25 cards from the visible list.
-
-**Extract posting dates:** LinkedIn renders date as `"Posted X ago"` in each card's text (e.g. `"Posted 1 week ago"`, `"Posted 4 days ago"`, `"Posted 3 weeks ago"`, `"Posted 1 month ago"`). The string appears twice per card due to screen-reader markup — use the first match. Parse this from the `get_page_text` output already retrieved for card list parsing — no extra tool call needed. Store as `CARD_DATES` (a title → relative date string map). Convert the relative string to an approximate absolute date using today's date for the age check (e.g. "1 week ago" = today − 7d, "3 weeks ago" = today − 21d, "1 month ago" = today − 30d). Cards showing `"We won't recommend this job anymore."` instead of a date (previously dismissed) or Promoted cards with no date string have no detectable date — allow through.
+**Card selector:** the job cards are `div[role="button"]` inside `<main>` whose text is a multi-line block (title / company / location). Filter to these:
+```js
+const main = document.querySelector('main');
+Array.from(main.querySelectorAll('div[role="button"]'))
+  .filter(el => { const t = el.innerText?.trim() || ''; return t.length > 25 && t.length < 400 && t.split('\n').length >= 2; })
+  .length
+```
+This count is `[N]` (expect up to 25). Per card, the text lines give `title` (first non-empty line), `company` (next), and `location` + `work_type` (infer Remote/Hybrid/On-site from the parenthetical). Ignore "Promoted" / "Viewed" / "Easy Apply" badge lines when parsing.
 
 Announce: `📋 Found [N] job cards on this page.`
 
+### Step 2b — Harvest job IDs by clicking each card
+
+The job ID is required for the JD fetch (Step 4), the canonical URL, and CSV dedup. Click each card and read the resulting `currentJobId` from the URL. The click updates the URL asynchronously (~130ms typical, measured 68–174ms) — it does **not** load the JD, so a short poll is enough; do not use a multi-second wait. A full 25-card walk takes ~4s. Run the whole walk in **one** `javascript_tool` call (the loop must be a single async block so timing is consistent):
+
+```js
+await (async () => {
+  const main = document.querySelector('main');
+  const getCards = () => Array.from(main.querySelectorAll('div[role="button"]'))
+    .filter(el => { const t = el.innerText?.trim() || ''; return t.length > 25 && t.length < 400 && t.split('\n').length >= 2; });
+  const curId = () => new URL(location.href).searchParams.get('currentJobId');
+  const results = [];
+  const seenIds = new Set();
+  const total = getCards().length;
+  for (let i = 0; i < total; i++) {
+    const card = getCards()[i];                // re-query each iteration (list may re-render)
+    if (!card) { results.push({ i, err: 'no-card' }); continue; }
+    const lines = card.innerText.split('\n').map(s => s.trim()).filter(Boolean);
+    const title = (lines[0] || '').slice(0, 80);
+    const company = (lines[1] || '').slice(0, 80);
+    const idBefore = curId();
+    let id = null;
+    for (let attempt = 0; attempt < 3 && !id; attempt++) {        // retry click up to 3x
+      card.scrollIntoView({ block: 'center' });
+      await new Promise(r => setTimeout(r, 30));
+      card.click();
+      // The click updates the URL's currentJobId asynchronously (~70-175ms measured), NOT a JD render.
+      // Tight poll: exit the instant the id changes; 1s ceiling as a safety net for a slow card.
+      for (let w = 0; w < 50; w++) {                               // 20ms x 50 = 1s ceiling
+        await new Promise(r => setTimeout(r, 20));
+        const now = curId();
+        if (now && now !== idBefore) { id = now; break; }
+      }
+      if (!id && attempt === 0 && i === 0) id = curId();           // first card may already be selected
+    }
+    if (!id) id = curId();
+    results.push({ i, title, company, id, dup: seenIds.has(id) });
+    if (id) seenIds.add(id);
+  }
+  window.__cardWalk = { hidden: document.hidden, total, collected: results.length, uniqueIds: seenIds.size, nulls: results.filter(x => !x.id).length, results };
+})();
+JSON.stringify({ total: window.__cardWalk.total, uniqueIds: window.__cardWalk.uniqueIds, nulls: window.__cardWalk.nulls })
+```
+
+Then read the full pairs with a second call: `JSON.stringify(window.__cardWalk.results)`.
+
+Build `CARD_LIST` from `window.__cardWalk.results` as `{ title, company, location, work_type, id }` per card (merge in location/work_type parsed from the card text lines).
+
+**Integrity checks:**
+- If `uniqueIds < total` (a duplicate ID appeared), the poll likely missed a change on one card. Re-run the walk once. If a duplicate persists, mark the **second** occurrence `⚠️ Unverified — ambiguous ID` rather than processing it twice.
+- Any card with `id === null` after the walk → mark `⚠️ Unverified — could not resolve job ID`. Do NOT fetch a JD for it; do NOT guess an ID.
+- Each `id` must be an 8+ digit number. Anything else → treat as null/Unverified.
+
+Announce: `🔗 Resolved [uniqueIds]/[total] job IDs.`
+
 ---
 
-## Step 3 — Card-Level Smart Skip
+## Step 3 — Card-Level Smart Skip (Pre-Fetch)
 
-Before clicking any card, apply two checks. Either check failing → skip without clicking. If uncertain on either, click through.
+> **Ordering:** The click-walk in Step 2b harvests every card's ID in a single pass, so by the time you reach Step 3 each card in `CARD_LIST` already has its `id`, title, and company. Apply all skip checks below (card-skip cache, CSV URL match, CSV company+title match, title blocklist, location blocklist) here, before any JD fetch in Step 4. The CSV URL match uses the harvested `id`; the others use card text. Skipping a card here means "don't fetch its JD" — the click to harvest its ID already happened in 2b and is unavoidable.
 
-**Age check** (card-level only, applied before title/location checks):
-- Look up the card's title in `CARD_DATES`
-- If a `datetime` value is found AND the posting date is > 14 days before today → skip with `⛔ age-skip`. Exactly 14 days ago ("2 weeks ago") passes — only strictly more than 14 days triggers the skip.
-- If the title is absent from `CARD_DATES` (Promoted or no date shown) → allow through; do not filter
+For each card in `CARD_LIST`, apply the following checks in order before making any JD fetch. Either check failing → skip without fetching. If uncertain, allow through.
 
-**Title blocklist** (case-insensitive substring match — skip if any term appears in the title):
+**Dedup check:** Run checks in order, stopping at first match:
+- **Card-skip cache:** check `### scout-link card skips` table in `.claude/memory/scout-cache.md` for a row with matching company + title within the last 60 days → drop silently.
+- **CSV URL match:** check `Posting_URL` column for any URL containing the job ID (e.g. a `Posting_URL` ending in `/view/[jobId]/`).
+- **CSV company+title match:** check for a CSV row with the same company (case-insensitive) AND same role title (case-insensitive) where `Date` is within the last 30 days.
+
+For any CSV match: status `closed` or `skipped` → drop silently. Any other status → log `⚠️ [Company] — [Title] → already in CSV (status: [status], date: [date]); skipping`.
+
+**Title blocklist** (case-insensitive substring match on card title — skip if any term matches):
 ⚠️ Exception: "Developer" qualified by a data domain (SQL, ETL, BI, Data, Analytics) does NOT trigger the "Software Developer" block — e.g. "SQL Developer", "ETL Developer", "BI Developer" all pass.
 - Software Engineer
 - Software Developer
@@ -140,128 +208,87 @@ Before clicking any card, apply two checks. Either check failing → skip withou
 - Frontend
 
 **Location blocklist** (inferred from the card location string):
-- Any city other than Calgary + `(On-site)` → skip (e.g. "Edmonton, AB (On-site)", "Toronto, ON (On-site)")
-- Any location outside Alberta + `(Hybrid)` → skip (e.g. "Toronto, ON (Hybrid)", "Vancouver, BC (Hybrid)")
-- Alberta cities other than Calgary + `(Hybrid)` → allow (e.g. "Edmonton, AB (Hybrid)" is fine)
+- Any city other than Calgary + `(On-site)` → skip
+- Any location outside Alberta + `(Hybrid)` → skip
+- Alberta cities other than Calgary + `(Hybrid)` → allow
 - Remote (any location) → allow
-- No location or ambiguous → click through
+- No location or ambiguous → allow through
 
-Skipped cards are **included in the output table** (Step 8) with `⛔ age-skip`, `⛔ title-skip`, or `⛔ location-skip` in the Filter Score column.
+Skipped cards are **included in the output table** (Step 8) with `⛔ title-skip` or `⛔ location-skip` in the Filter Score column.
 
-**Queue title-skipped cards for dismiss confirmation:** For each **title-skip** card only, add it to a `DISMISS_QUEUE` list. Do not click any dismiss buttons during the run. The queue is presented to the user at the end of the run (Step 9) for confirmation before any dismissals happen.
+**Queue title-skipped cards for dismiss confirmation:** For each **title-skip** card only, add it to a `DISMISS_QUEUE` list. Do not attempt any dismiss clicks during the run. The queue is presented to the user at the end of the run (Step 9) for confirmation before any dismissals happen.
 
-**Age-skip and location-skip cards are NOT queued for dismissal** — dismissing these would negatively affect LinkedIn's recommendation algorithm. They are skipped silently without any dismiss action.
+**Location-skip cards are NOT queued for dismissal** — dismissing these would negatively affect LinkedIn's recommendation algorithm.
 
 `DISMISS_QUEUE` entry format: `{ company, title, skip_reason }` (e.g. `{ "Dasro Consulting Inc.", "SAP Data Analyst", "title-skip" }`).
 
-Announce: `⏭️ [N] card(s) skipped (age, title, or location) — [N] title-skip(s) queued for dismiss confirmation.`
+Announce: `⏭️ [N] card(s) skipped (title or location) — [N] title-skip(s) queued for dismiss confirmation.`
 
 ---
 
-## Step 4 — Click and Extract JDs
+## Step 4 — API Fetch and Extract JDs
 
-**Stay on the search results page throughout this entire step.** Do not navigate to `/jobs/view/[jobId]/` or any other URL. All JD extraction happens from the right panel of the search results page.
+**Stay on the search results page throughout this entire step.** Do not navigate away.
 
-**Card structure:** LinkedIn cards are `div[role="button"]` elements with `tabindex=0` — they have no aria-label and no job ID in the DOM. The job ID only becomes available in the URL **after** clicking. Do not use `find` to click cards — it matches on inner text and can click the wrong card when titles are similar (e.g. two "Data Engineer" roles). Use `javascript_tool` to target cards precisely by title + company text match, then `.click()` them directly.
+For each card that passed Step 3, fetch the full job data via the Voyager API from within the page context. This call inherits the user's LinkedIn session cookies and requires no tab focus or DOM rendering.
 
-For each card not skipped in 3, in order:
-
-1. Use `javascript_tool` to find and click the correct card by matching both title AND company in the card's text content:
-   ```js
-   const cards = Array.from(document.querySelectorAll('div[role="button"][tabindex="0"]'))
-     .filter(el => el.offsetParent !== null);
-   const target = cards.find(el => {
-     const t = el.textContent;
-     return t.includes('[Title]') && t.includes('[Company]');
-   });
-   if (target) { target.click(); 'clicked' } else { 'not found' }
-   ```
-   Replace `[Title]` and `[Company]` with the exact strings from 2. If `'not found'`: scroll the left panel down 2 ticks, wait 1s, retry once. If still not found, log `⚠️ [Company] — [Title] → card not found in DOM; skipping`.
-2. Wait 2–3s for the right panel to load.
-3. **Verify the card loaded correctly:** Read `currentJobId` from the page URL (via `javascript_tool`: `new URL(window.location.href).searchParams.get('currentJobId')`). Store this as `EXPECTED_JOB_ID`. Also read the tab title — it should contain the expected company name and role title. If the tab title shows a different company or role than expected, do not record this ID — log `⚠️ [Company] — [Title] → ID mismatch in tab title; skipping` and proceed to next card. **Never record a job ID that was inferred, guessed, or constructed without clicking the card.**
-4. Construct canonical URL: `https://www.linkedin.com/jobs/view/[jobId]/`
-5. **Dedup check:** run checks in order, stopping at the first match:
-   - **Card-skip cache:** check the `### scout-link card skips` table in `.claude/memory/scout-cache.md` for a row with matching company + title within the last 60 days → drop silently; proceed to next card.
-   - **CSV URL match:** check `Posting_URL` column (case-insensitive exact match).
-   - **CSV company+title match:** check for a CSV row with the same company name (case-insensitive) AND same role title (case-insensitive) where `Date` is within the last 30 days.
-
-   For any CSV match found:
-   - status `closed` or `skipped` → drop silently; proceed to next card.
-   - Any other status → log `⚠️ [Company] — [Title] → already in CSV (status: [status], date: [date]); skipping` and proceed to next card. **Do not extract the JD, do not run the filter, do not append a new CSV row.**
-5b. **All-duplicate check:** If every non-title-skipped card on the current page was a duplicate (already in CSV or cache) — i.e. zero new JDs were extracted and scored — automatically advance to the next page rather than stopping. Click the "Next" pagination link at the bottom of the results using `javascript_tool`:
+**Read the CSRF token once** before the loop:
 ```js
-const next = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.trim() === 'Next');
-if (next) { next.click(); 'clicked' } else { 'not found' }
+const csrf = document.cookie.match(/JSESSIONID="?([^";]+)/)?.[1] || '';
+csrf
 ```
-Wait 3s for the new page to load, then restart from Step 2 on the new set of cards. Continue paginating until at least one new JD is found, or until LinkedIn shows no "Next" button (end of results), at which point announce: `📭 All pages exhausted — no new roles found.`
-6. **Signal tab activity** — immediately after the card click, run:
-   ```js
-   window.focus();
-   document.dispatchEvent(new Event('visibilitychange'));
-   document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 800, clientY: 400 }));
-   'signaled'
-   ```
-   This signals to the browser that the tab is active and unthrottles deferred JS renders. Run this as a separate tool call before the wait below.
-6a. **Wait 3s** as a separate tool call before touching the right panel — the panel renders asynchronously and must not be read immediately after the click. This wait is mandatory regardless of how fast prior steps completed.
-6b. **Body length check:** Before attempting extraction, confirm the page has grown beyond the card-list baseline. Run:
-    ```js
-    document.body.innerText.length
-    ```
-    If the length is ≤ 4500 chars, the right panel has not injected content yet. Scroll the right side of the viewport down 2–3 ticks, wait 2s, and re-check once. If still ≤ 4500 after the retry, treat as a render failure — apply the same stop/ask logic as a null extraction result in step 8.
-6c. **Job ID consistency check:** Confirm the `currentJobId` in the URL still matches `EXPECTED_JOB_ID` (from step 3). If it has changed (another card loaded in the background), click the original card again and restart from step 6.
-7. **Expand the full JD:** Click the "… more" button if present to ensure the full description is loaded. Use `javascript_tool`:
-   ```js
-   const btn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('… more') && el.offsetParent !== null);
-   if (btn) { btn.click(); 'clicked' } else { 'not found' }
-   ```
-   Wait 1s after clicking. If `'not found'`, the JD may already be fully expanded — proceed to step 8.
-7b. **Scroll the right panel** to ensure the full JD is rendered into the DOM. Use `javascript_tool`:
-    ```js
-    const panel = document.querySelector('.jobs-search__job-details, [class*="job-details"], [class*="jobs-unified-top-card"]');
-    if (panel) { panel.scrollTop += 300; 'scrolled' } else { 'panel not found' }
-    ```
-    Wait 1s after scrolling.
-8. **Extract JD via right-panel DOM** — do NOT use `get_page_text`. LinkedIn renders the right panel outside `<main>`, so `get_page_text` misses it. Target the right panel directly, then fall back to full body search.
 
-   **Primary method — bounded extraction (preferred):** Use the natural end-of-JD anchor `"See how you compare"` to extract the full JD in a single call, avoiding tool-response truncation. This anchor is rendered by LinkedIn Premium and is reliably present for this account — treat it as the stable primary method, not an edge case:
-   ```js
-   const panel = document.querySelector('.jobs-search__job-details, [class*="job-details"]');
-   const src = (panel && panel.innerText.length > 500) ? panel.innerText : document.body.innerText;
-   const start = src.indexOf('About the job');
-   const end = src.indexOf('See how you compare');
-   (start >= 0 && end > start) ? src.substring(start, end)
-     : (start >= 0 ? src.substring(start, start + 6000) : null)
-   ```
-   This returns the full JD text in one call for the majority of postings. If `null` (anchor not found), scroll the right panel down 2–3 ticks, wait 2s, and retry once.
+**Per-card API fetch:**
+```js
+const jobId = '[JOB_ID]';
+const resp = await fetch(`/voyager/api/jobs/jobPostings/${jobId}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebFullJobPosting-65`, {
+  headers: {
+    'accept': 'application/vnd.linkedin.normalized+json+2.1',
+    'csrf-token': '[CSRF]',
+    'x-restli-protocol-version': '2.0.0',
+  },
+  credentials: 'include'
+});
+const data = await resp.json();
+const d = data?.data;
+JSON.stringify({
+  status: resp.status,
+  title: d?.title,
+  company: data?.included?.find(i => i.$type?.includes('Company'))?.name,
+  loc: d?.formattedLocation,
+  remoteAllowed: d?.workRemoteAllowed,
+  listedAt: d?.listedAt,
+  descLen: d?.description?.text?.length,
+  desc: d?.description?.text
+})
+```
 
-   **Fallback method — fixed-window chunking (use if bounded extraction returns null or end anchor is absent):**
-   ```js
-   // Chunk 1
-   const panel = document.querySelector('.jobs-search__job-details, [class*="job-details"]');
-   const src = (panel && panel.innerText.length > 500) ? panel.innerText : document.body.innerText;
-   const idx = src.indexOf('About the job');
-   idx >= 0 ? src.substring(idx, idx + 6000) : null
-   ```
-   If 6000 chars truncates mid-sentence, fetch the next chunk:
-   ```js
-   // Chunk 2
-   const panel = document.querySelector('.jobs-search__job-details, [class*="job-details"]');
-   const src = (panel && panel.innerText.length > 500) ? panel.innerText : document.body.innerText;
-   const idx = src.indexOf('About the job');
-   idx >= 0 ? src.substring(idx + 6000, idx + 12000) : null
-   ```
-   Note: fixed-window chunking may still be cut off by the Chrome MCP tool's response limit. More testing needed before promoting this as the primary method — keep both approaches for now.
-9. Check extracted text for job description content (responsibilities, requirements, or qualifications):
-   - **Present and non-empty** → JD extracted; run filter inline (from `skills/filter/SKILL.md`) on this card's JD before moving to the next card
-   - **Empty or null** → wait 3s and retry Step 6 once as a separate tool call.
-     - Still empty after retry → **re-click the card** (click it again via `javascript_tool`) and wait 3s. This resolves lazy-render failures where LinkedIn delays injecting the right panel DOM. Re-check body length and extraction after the re-click.
-     - Still empty after re-click → stop and ask: "JD not loading for [Company] — [Title] (ID: [jobId]). Right panel may not have rendered. How would you like to proceed? (skip this card / try again / stop scout)"
-     - **Session-wide panel failure** (multiple consecutive native-LinkedIn cards returning null): do NOT reload the page. Instead, continue clicking remaining cards — the issue resolves itself as the page warms up. Cohere-pattern fix: re-clicking the same card after the page has been active longer often succeeds.
-     - Do NOT navigate to `https://www.linkedin.com/jobs/view/[jobId]/` as a fallback — this leaves the search results page and breaks the card extraction flow.
+**Error handling:**
+- Non-200 response → log `⚠️ API error [status] for [Company] — [Title] (ID: [jobId]); skipping` and proceed to next card.
+- 401 → stop entire run immediately: `⛔ LinkedIn session expired. Log in to LinkedIn in Chrome and re-run /scout-link.`
+- Rate limiting (429) → wait 5s and retry once. If still 429, stop and report.
 
-**Do not navigate away from the search results page between cards.** Clicking a card updates the right panel in-place — the left card list remains intact and the next card can be clicked immediately after extraction.
+**Age skip (post-fetch):** Convert `listedAt` (Unix ms) to a date. If `new Date(listedAt) < today − 14 days` (strictly more than 14 days old) → skip with `⛔ age-skip`. Exactly 14 days old passes. Add to card-skip cache (Step 7) but NOT to DISMISS_QUEUE.
 
-Log inline progress: `✓ [Company] — [Title] (ID: [jobId]) → JD extracted` / `↩️ [Company] — [Title] → CSV dedup, skipping` / `⚠️ [Company] — [Title] → ID mismatch or JD not retrieved`
+**All-duplicate check:** If every card on the current page was a title-skip, location-skip, dedup, or age-skip — i.e. zero new JDs were extracted and scored — automatically advance to the next page. Prefer incrementing the `start` offset in the URL by 25 (most reliable post-RSC), falling back to a "Next" button click if present. Use `javascript_tool`:
+```js
+// Preferred: bump the start offset by 25 and reload the results
+const u = new URL(window.location.href);
+const cur = parseInt(u.searchParams.get('start') || '0', 10);
+u.searchParams.set('start', cur + 25);
+const next = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.trim() === 'Next');
+if (next) { next.click(); 'clicked-next' }
+else { window.location.href = u.toString(); 'offset-advanced' }
+```
+Wait 3s, then restart from Step 2. Continue until at least one new JD is found or no "Next" button exists: `📭 All pages exhausted — no new roles found.`
+
+**JD extraction:** Use `d?.description?.text` directly from the API response — no DOM selectors, no anchors, no chunking needed. If `desc` is null or empty → log `⚠️ [Company] — [Title] (ID: [jobId]) → no JD in API response; skipping`.
+
+**Run filter** (from `skills/filter/SKILL.md`) on `desc` for each card with a non-empty JD before moving to the next card.
+
+Construct canonical URL: `https://www.linkedin.com/jobs/view/[jobId]/`
+
+Log inline progress: `✓ [Company] — [Title] (ID: [jobId]) → JD extracted ([N] chars)` / `↩️ [Company] — [Title] → CSV dedup, skipping` / `⛔ [Company] — [Title] → age-skip` / `⚠️ [Company] — [Title] → API error or no JD`
 
 ---
 
@@ -278,17 +305,36 @@ Process each qualifying card fully (save → match) before moving to the next ca
 
 ## Step 6 — Update Tracker
 
-Log all scored roles to `job-outputs/jobs.csv`:
+Log all scored roles to `job-outputs/jobs.csv`.
+
+> **⚠️ Write rows positionally — this is the #1 cause of tracker corruption.** The header has **exactly 22 columns**. Every appended row must have **exactly 22 fields (21 commas)** in the exact order below — including every empty field as an empty string (no spaces, no skipped commas). The field list further down explains each field's *meaning*; this template defines each field's *position*. Build the row from this template, do not assemble it freehand.
+>
+> **22-field column order (positional template):**
+> ```
+> Company,Role,Date,Status,Resume_Used,Posting_File,Posting_URL,Redirect_URL,Filter_Score,Top_Skills,Match_Score,Match_Label,Posted_Comp,Market_Min_CAD,Market_Max_CAD,Work_Type,Contract_Length,Notes,Source,Job_ID,Contacted,Search_Terms
+> ```
+> For scout-link, a typical scored row looks like (note the empty fields kept as bare commas):
+> ```
+> Company,"Role, with comma",2026-06-21,pending,,,https://www.linkedin.com/jobs/view/[jobId]/,,7,skill1 | skill2 | skill3,,,,,,Remote,permanent,,scout-link,,,
+> ```
+> **URL placement rule:** the canonical LinkedIn URL goes in **`Posting_URL`** (column 7). **`Redirect_URL`** (column 8) is **Adzuna-only** — always blank for scout-link rows. Never put the LinkedIn URL in `Redirect_URL`.
+>
+> **Quote any field containing a comma** (e.g. a Role or Notes with a comma) with double quotes, or it will split into extra fields and break the 22-field count.
+>
+> **Before saving, verify each new row:** count the fields = 22; confirm `Posting_URL` holds the `https://www.linkedin.com/jobs/view/...` URL and `Redirect_URL` is blank; confirm `Source` = `scout-link`. If any check fails, fix the row before writing — do not append a malformed row.
 
 For every listing that was scored by the filter:
 - `Status`: `pending` if ≥6/10; `skipped` if below 6/10.
 - `Filter_Score`: the /10 score. Leave blank if JD was not retrieved.
-- `Top_Skills`: top 3 skills most emphasized in the JD, comma-separated (e.g. `dbt, Snowflake, SQL`). Leave blank if JD was not retrieved.
-- `Posting_URL`: canonical LinkedIn URL (`https://www.linkedin.com/jobs/view/[jobId]/`). **Required for any card that was scored by the filter** — the URL is the dedup key that prevents re-scoring on future runs. Leave blank only for cards that were hard-blocked before scoring (age-skip, title-skip, location-skip) — those don't need a URL since the block fires before the card is clicked.
+- `Top_Skills`: top 3 skills most emphasized in the JD, pipe-separated (e.g. `dbt | Snowflake | SQL`). Leave blank if JD was not retrieved.
+- `Posting_URL`: canonical LinkedIn URL (`https://www.linkedin.com/jobs/view/[jobId]/`), built from the harvested job ID. **Required for any card that was scored by the filter** — the URL is the dedup key that prevents re-scoring on future runs. Title-skip, location-skip, age-skip, and dedup-skip cards all have a harvested job ID but are not logged to jobs.csv at all (see Step 7) — so this field never needs a blank-for-skips exception.
 - `Notes`: skip reason for below-threshold rows (e.g. "Filter score 4/10 — seniority mismatch"); blank for ≥6/10.
 - `Source`: `scout-link`
 - `Work_Type`: from card metadata (Remote / Hybrid / On-site).
 - `Contract_Length`: `permanent` unless contract language is present in the JD.
+- `Search_Terms`: blank for scout-link
+- `Job_ID`: blank for scout-link
+- `Redirect_URL`: blank for scout-link
 
 For ⚠️ Unverified listings (JD not retrieved): log with status `pending`, blank `Filter_Score`, blank `Top_Skills`, and Notes: `"⚠️ Unverified — JD not retrieved"`.
 
@@ -314,7 +360,7 @@ Write all hard-blocked cards (age-skip, title-skip, location-skip) from this run
 
 **Pruning:** At the start of each scout-link run, remove any rows in this section older than 60 days before writing new entries.
 
-**Dedup check (Step 4, Step 5):** Before checking the CSV, check this cache. If the card's company + title appears in the cache with a date within the last 60 days → drop silently, do not click, do not score. This prevents re-processing cards that were already hard-blocked on a prior run.
+**Dedup check (Step 3):** Before checking the CSV, check this cache. If the card's company + title appears in the cache with a date within the last 60 days → drop silently, do not fetch, do not score. This prevents re-processing cards that were already hard-blocked on a prior run.
 
 ---
 
@@ -325,7 +371,7 @@ Write all hard-blocked cards (age-skip, title-skip, location-skip) from this run
 ─────────────────────────────────────────
 🔍 Job Scout Results
 Mode: LinkedIn (scout-link / [top-applicant|preferences])
-Cards found: [N] | Card-skipped: [N] | Cached: [N] | JD retrieved: [N] | JD failed: [N] | Page 1 only — for more results, pass a search URL with &start=25
+Cards found: [N] | Card-skipped: [N] | Cached: [N] | JD retrieved: [N] | JD failed: [N] | Page [N] — for more results, pass a search URL with &start=[OFFSET]
 Live listings: [N] | Location-excluded: [N] | Dead dropped: [N]
 Ranked by: Filter Score
 ─────────────────────────────────────────
@@ -375,7 +421,7 @@ These will be dismissed from LinkedIn recommendations once confirmed.
 
 | # | Company | Title | Reason |
 |---|---------|-------|--------|
-| 1 | [Company] | [Title] | [title-skip / age-skip / location-skip] |
+| 1 | [Company] | [Title] | title-skip |
 ...
 
 Dismiss all? (yes / no / edit list)
@@ -412,6 +458,6 @@ Replace `[Job Title]` and `[Company]` with exact strings from Step 2. If `'not f
 - Never fabricate listings or scores — score only from actual JD text; mark ⚠️ Unverified if JD unavailable
 - Source field is mandatory in every CSV row — always `scout-link`
 - Job_ID field: leave blank for all scout-link rows — only SI Systems portal rows use this field
-- Do not navigate to `/jobs/view/[jobId]/` at any point during card extraction
-- Never record a job ID that was inferred, guessed, or constructed without clicking the card
-- French postings use the same English UI chrome — "About the job" anchor always applies; JD body may be French but navigation/headers stay English
+- Do not navigate the browser to `/jobs/view/[jobId]/` at any point during the run — constructing it as a string for the CSV `Posting_URL` field is correct and expected. Note: clicking a card in Step 2b does NOT navigate there; it stays on the search-results page and only updates the `currentJobId` query param. That is expected and required.
+- Job IDs are harvested by clicking each card and reading the URL's `currentJobId` (Step 2b) — the DOM no longer exposes them as attributes post-RSC-migration. Never infer, guess, or fabricate a job ID; if a card's ID cannot be harvested (null after the walk, or a duplicate collision), mark it ⚠️ Unverified rather than guessing.
+- French postings: `description.text` from the API response may be in French — score it as-is; the filter still applies

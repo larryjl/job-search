@@ -222,12 +222,15 @@ For every card that reached filter scoring:
 - `Contract_Length`: `permanent` unless contract language present in JD
 - `Notes`: skip reason for below-threshold rows; blank for ≥ 6/10
 - `Source`: `scout-indeed`
+- `Search_Terms`: blank for scout-indeed
+- `Job_ID`: blank for scout-indeed
+- `Redirect_URL`: blank for scout-indeed
 
 For ⚠️ JD-failed cards: log with status `pending`, blank scores, Notes: `"⚠️ Unverified — JD not loaded"`
 
 For ⛔ age-skip cards: log with status `skipped`, Notes: `"card-skipped — age-skip ({datePosted})"`
 
-For title-skip / location-skip cards: log with status `skipped`, Notes: `"card-skipped — [title-skip / location-skip]"`
+For title-skip / location-skip cards: log with status `skipped`, Notes: `"card-skipped — [title-skip / location-skip]"`. Leave `Contract_Length` blank for these rows — no JD was retrieved.
 
 ---
 
@@ -254,7 +257,7 @@ After completing each page:
 
 ## Step 9 — Update Memory
 
-Write to `scout-cache.md` only. Do not write to the Verified Postings Cache — jobs.csv is the source of truth for URL dedup.
+Write to `scout-cache.md` only. jobs.csv is the source of truth for URL dedup.
 
 **Scout Cache** (`## Scout Cache`) — prepend a new entry; never overwrite:
 

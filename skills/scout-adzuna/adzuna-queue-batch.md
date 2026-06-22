@@ -21,7 +21,7 @@ Read the following files before doing anything else:
 - `CLAUDE.md` — master instructions
 - `profile/targets.md` — location constraints, salary floor, role preferences
 - `.claude/memory/learnings.md` — compensation cache, match patterns
-- `.claude/memory/scout-cache.md` — verified postings cache (for dedup)
+- `.claude/memory/scout-cache.md` — run history and card-skip cache
 - `.claude/memory/raw-results-queue.json` — the queue (your primary input)
 - `profile/master-resume.md` — required for job-match scoring
 - `profile/skills-inventory.md` — required for job-match gap analysis
@@ -46,9 +46,8 @@ Count and note: how many unprocessed remain after marking your batch (total unpr
 For each item in your batch, run the following sequence. Process items one at a time — do not batch Chrome calls across items.
 
 ### 3a — Dedup check
-Check `job-outputs/jobs.csv` `Posting_URL` column for the `redirect_url` (case-insensitive). Also check `scout-cache.md` Verified Postings Cache.
-- Status `closed` or `skipped` → drop silently
-- Any other status → drop silently (already tracked)
+Check `job-outputs/jobs.csv` `Redirect_URL` column for the queue item's `redirect_url` (case-insensitive exact match).
+- Any match regardless of status → drop silently (already tracked or already closed)
 - No match → proceed
 
 ### 3b — API description pre-screen
@@ -65,11 +64,11 @@ Follow steps Z4 Step 1–4 from `skills/scout-adzuna/SKILL.md` exactly:
 3. Classify: ✅ Verified / ❌ Dead / ⚠️ Unverified (per Z4 Step 3 definitions)
 4. Capture expiry/deadline if present
 
-Dead → drop; add to Dead URL Cache in `scout-cache.md`.
+Dead → drop; write a `closed` row to `job-outputs/jobs.csv` with: canonical URL (`Posting_URL`), queue item's `redirect_url` (`Redirect_URL`), company, role, source `scout-adzuna`, today's date, Search_Terms (pipe-separated from queue item's `search_terms` field). Leave Contract_Length, Job_ID, and all other columns blank. Skip if a row already exists for that `Redirect_URL`.
 Unverified → keep with flag; use Adzuna redirect_url as canonical.
 
 ### 3d — Full location filter
-Apply Step 5 from `skills/scout-adzuna/SKILL.md` on the full JD text.
+Apply hard-exclude location rules from `profile/targets.md` on the full JD text (on-site or hybrid outside Calgary/Alberta, non-Canadian location, explicit relocation required, etc.).
 Hard exclude → drop with note.
 Flags → keep, note in CSV Notes field.
 
@@ -81,7 +80,7 @@ Run `skills/filter/SKILL.md` on the full JD. Score /10.
 ### 3f — Write to jobs.csv
 For every item that reached scoring (including below-threshold):
 - Status: `pending` if ≥6/10; `skipped` if below
-- Filter_Score, Top_Skills, Posting_URL (canonical), Work_Type, Contract_Length, Source: `scout-adzuna`
+- Filter_Score, Top_Skills, Posting_URL (canonical), Redirect_URL (queue item's `redirect_url`), Work_Type, Contract_Length, Source: `scout-adzuna`, Search_Terms: pipe-separated terms from the queue item's `search_terms` field
 - Work_Type: populate only if explicitly stated in the JD (`Remote`, `Hybrid`, `On-site`). Leave blank if not confirmed — do not infer from city name alone.
 - Notes: skip reason if below threshold; other strategic flags (e.g. deadlines, contract terms). Do NOT add notes like "remote unconfirmed" or "verify remote eligibility" — if work model isn't in the JD, simply leave Work_Type blank.
 - Skip if row already exists for same Posting_URL
@@ -104,11 +103,7 @@ Run quick job-match per `skills/job-match/SKILL.md`:
 - Step Final: save the `.md` match report to `job-outputs/reports/` as normal, AND write `Match_Score` and `Match_Label` to the existing `jobs.csv` row
 
 ### 3h — Update scout-cache.md
-Append all processed items to `## Verified Postings Cache`:
-
-| Company | Role | URL | Source | Status | Filter Score | Cached | Search Terms |
-
-Also append dead URLs to `## Dead URL Cache`.
+Append the run entry to `## Scout Cache` (handled in Step 5). No other cache writes required.
 
 ---
 

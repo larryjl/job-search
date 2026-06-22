@@ -20,7 +20,7 @@ Silently load before any searching:
 **A. Targets** from `profile/targets.md`
 
 **B. Scout cache:**
-Read `scout-cache.md` before any searching begins. Use the Verified Postings Cache and Dead/Hard-Excluded caches for dedup at Step Z4b — drop any URL already present. Always run fresh (no cache-age prompt for Adzuna mode).
+Read `scout-cache.md` before any searching begins (run history only — no cache dedup step for Adzuna mode). Always run fresh.
 
 ---
 
@@ -116,7 +116,7 @@ Read `/tmp/adzuna_results.json` (processed results — not raw API output). For 
 }
 ```
 
-`search_terms` — deduplicated list of role terms (what keywords only, no location) that returned this job ID in this fetch. Populated by the script; written to the `Search Terms` column of the Verified Postings Cache in `scout-cache.md` for overlap analysis.
+`search_terms` — deduplicated list of role terms (what keywords only, no location) that returned this job ID in this fetch. Populated by the script; written to the `Search_Terms` column of `jobs.csv` when the item is scored.
 
 Skip items that already exist in `adzuna.items` with the same `id` (dedup on Adzuna `id` field — catches both duplicate results within this fetch across multiple search terms/locations, and jobs already processed in prior runs). Do NOT dedup on company+title — a repost or a second role with the same title at the same company will have a different `id` and must flow through. Announce: `📥 Added [N] new items to queue ([M] already present — skipped). Queue depth: [total unprocessed].`
 
@@ -180,7 +180,7 @@ Process each item **one at a time** — do not batch the Apply/redirect sequence
 **Step 3 — Classify resolved destination**
 
 - **✅ Verified source-live:** Resolved URL is the company's own ATS or careers domain (Workday, Lever, Greenhouse, Ashby, Dayforce, BambooHR, or company careers page) and the page shows an active job posting or Apply CTA. Record the company URL as the canonical posting URL — use it in all downstream steps (cache, CSV) instead of the Adzuna URL.
-- **❌ Dead (source-closed):** Resolved URL shows a closed/expired/404 page, "this job is no longer available", or ATS empty/error state. Drop from results; add to Dead URL Cache using the Adzuna `redirect_url`.
+- **❌ Dead (source-closed):** Resolved URL shows a closed/expired/404 page, "this job is no longer available", or ATS empty/error state. Drop from results; write a `closed` row to `job-outputs/jobs.csv` with the canonical URL (`Posting_URL`), queue item's `redirect_url` (`Redirect_URL`), company, role, source `scout-adzuna`, today's date, and Search_Terms (pipe-separated from queue item's `search_terms` field). Leave all other columns blank. Skip if a row already exists for that `Redirect_URL`.
 - **⚠️ Source unverified — third-party distributor:** Resolved URL is a job distribution aggregator (dejobs.org, recruitingsite.com, and similar) rather than the company's own domain or a known ATS. The job may still be live but the source is not authoritative. Keep in results with flag; use the distributor URL as canonical but note the limitation.
 - **⚠️ Source unverified:** Redirects back to Adzuna, to another job board, or to a page requiring login. Keep in results with flag; use Adzuna URL as canonical.
 
@@ -191,14 +191,6 @@ After `get_page_text` on the source page, scan for expiry or deadline language (
 Log inline: `✓ [Company] — [Role] → ✅ Source-live | resolved: https://...` or `✗ [Company] — [Role] → ❌ Source-closed`
 
 ---
-
-**Z4b — Verified Postings Cache dedup + jobs.csv deduplication** *(sub-agent only — executed in adzuna-queue-batch.md, runs after Z4 completes)*
-
-For each item with a resolved URL, check Verified Postings Cache (resolved URL, date ≤ 3 days): dead → drop silently; verified with score → use cached score; unverified → keep. No match → proceed to check 2.
-
-Source tag `scout-adzuna` is passed through to CSV writes and cache write-back inside each sub-agent batch.
-
-*(End of Z4b — sub-agent returns to adzuna-queue-batch.md for CSV writes and cache updates.)*
 
 ---
 
@@ -243,7 +235,7 @@ Recommendation: [one sentence]
 
 **Already-applied flag:** If the listing was flagged `⚠️ already applied` in deduplication, skip auto job-match — a match has already been run or a decision already made.
 
-**Unverified listings:** Do not run auto job-match on ⚠️ Unverified listings — JD content is insufficient for reliable scoring.
+**Unverified listings:** Only run auto job-match if a full JD was retrieved (≥200 chars of responsibilities/requirements). If JD was not retrieved or is insufficient, skip auto job-match.
 
 **After all listings are processed**, continue to Step 7 as normal. The ranked table in Step 9 should include the Match Score and Gaps for any listing where auto job-match ran:
 
@@ -261,8 +253,10 @@ For every listing that was scored by the filter:
 - Filter_Score: the /10 score. (Leave blank if JD was not retrieved.)
 - Top_Skills: top 3 skills pipe-separated (e.g. `dbt | Snowflake | SQL`). These are the most emphasized in the requirements and responsibilities. (Leave blank if JD was not retrieved.)
 - Posting_URL: canonical URL if available; blank if no URL
+- Redirect_URL: queue item's `redirect_url` (raw Adzuna URL)
 - Notes: skip reason for below-threshold rows (e.g. "Filter score 4/10 — seniority mismatch"); blank for ≥6/10
 - Source: `scout-adzuna`
+- Search_Terms: pipe-separated terms from the queue item's `search_terms` field
 
 For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, blank Top_Skills, and Notes: `"⚠️ Unverified — JD not retrieved"`.
 
@@ -270,17 +264,9 @@ For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, b
 
 ## Step 8 — Update Memory *(sub-agent only)*
 
-Skip A. Write B (Verified Postings Cache + Scout Cache run entry) and C (queue file).
+Skip A. Write B (Scout Cache run entry) and C (queue file).
 
 **B. `scout-cache.md`:**
-
-**Verified Postings Cache** (`## Verified Postings Cache`):
-
-| Company | Role | URL | Source | Status | Filter Score | Cached | Search Terms |
-
-- Append new rows; update existing rows on re-verification (match on URL); never delete rows
-- ✅ Verified: URL + score + date. ❌ Dead: Dead status + date. ⚠️ Unverified: date, re-attempted next run.
-- `Search Terms`: comma-separated role terms from `search_terms` (e.g. `data analyst, business analyst`).
 
 **Scout Cache** (`## Scout Cache`) — prepend a new entry; never overwrite:
 
