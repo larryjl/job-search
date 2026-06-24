@@ -44,27 +44,30 @@ Run this phase before navigating to the job search page. If already logged in, s
    - If your name is visible in the header → already logged in, skip to Phase 1.
    - If a login/email form is present → proceed with steps below.
 
-### Step 0.1: Enter Email
+### Step 0.1: Check for Autofill, Then Fill if Needed
 
-Use `find` to locate the email input field, then `form_input` to fill it with the account email address. Use `find` to locate the "Next" or "Sign in" button and click it. Wait 3 seconds.
+Chrome's password manager autofills the email and password fields automatically on this portal. Check field state before filling:
 
-### Step 0.2: Enter Password (if prompted)
+1. Call `read_page` (filter: interactive) to inspect the email and password fields.
+2. If both fields are already populated → do not use `form_input`. Proceed directly to clicking "Sign in".
+3. If either field is empty → use `find` + `form_input` to fill only the empty field(s) with the account email (`leelawrencej@gmail.com`) and/or password from the saved credential.
+4. Use `find` to locate the "Sign in" button and click it. Wait 3 seconds.
 
-If a password field appears: use `find` + `form_input` to fill it, then click the submit button. Wait 3 seconds.
+### Step 0.2: Handle Verification Code (if prompted)
 
-### Step 0.3: Handle Verification Code (if prompted)
+After clicking "Sign in", the portal may show a verification step on the same page (MSAL / Microsoft Azure B2C). The flow is:
 
-If a verification code entry field appears (MSAL / Microsoft email verification step):
-
-1. **Search Gmail** using `mcp__c403b25a-b59b-4370-997a-b95459ce1c1c__search_threads` with query:
+1. A "Send verification code" button appears with the email address pre-filled. Use `find` to locate the button with exact text "Send verification code" and click it. Wait 5 seconds for the email to arrive.
+2. **Search Gmail** using `mcp__c403b25a-b59b-4370-997a-b95459ce1c1c__search_threads` with query:
    ```
    from:msonlineservicesteam@microsoftonline.com subject:"S.i. Systems account email verification code" newer_than:5m
    ```
-2. If no thread found, wait 5 seconds and retry once. If still nothing, tell the user: "Verification email not found in Gmail — please enter the code manually and let me know when done."
-3. If a thread is found, call `get_thread` with the thread ID (use `FULL_CONTENT` format) and extract the numeric verification code using regex: look for a 6–8 digit number in the email body.
-4. Use `find` to locate the verification code input field, then `form_input` to enter the code. Click the submit/verify button.
-5. Wait 3 seconds, then call `read_page` to confirm login succeeded (your name visible in header).
-6. If login failed, tell the user: "Login failed after entering the verification code — please check the portal and let me know when you're logged in."
+3. Pick the most recent thread (highest `date`). If no thread found, wait 5 seconds and retry once. If still nothing, tell the user: "Verification email not found in Gmail — please enter the code manually and let me know when done."
+4. Call `get_thread` with the thread ID (use `FULL_CONTENT` format). Extract the 6-digit numeric verification code from the snippet or body — it appears as "Your code is: NNNNNN".
+5. The verification code input field appears on the same page (no navigation needed). Use `find` to locate it, then `form_input` to enter the 6-digit code. Click the "Verify code" button.
+6. Wait 3 seconds. The page shows "E-mail address verified. You can now continue." and the "Continue" button becomes active. Use `find` to locate "Continue" and click it.
+7. Wait 4 seconds, then confirm login succeeded — the tab URL should change to `portal.sisystems.com/#/portal/profile/view` or similar, and your name should be visible in the portal header.
+8. If login failed, tell the user: "Login failed after entering the verification code — please check the portal and let me know when you're logged in."
 
 ### Step 0.4: Mid-Run Re-Login
 
@@ -86,21 +89,13 @@ If the portal redirects to a login page mid-run (MSAL token expiry), run Phase 0
 
 Work through the job list from top to bottom. The list uses **infinite scroll** — scroll to the bottom first to load all available cards before starting card-by-card review:
 
-```js
-window.scrollTo(0, document.body.scrollHeight)
-```
+Run `js/scroll_to_bottom.js` via `javascript_tool`
 
 Wait 2 seconds, then check the DETAILS button count. If it increased, scroll again and wait. Repeat until the count stabilises. Only then start processing cards from index 0. This avoids missing cards that load below the initial viewport.
 
 Extract all card titles and ages in one JS pass before clicking anything:
-```js
-Array.from(document.querySelectorAll('.card')).map((c,i)=>{
-  var lines = c.innerText.trim().split('\n').map(s=>s.trim()).filter(s=>s.length>0);
-  var title = lines.find(l=>!l.startsWith('Expertise:')&&!l.startsWith('Job Type')&&!l.startsWith('Location')&&!l.startsWith('Posted')&&l!=='DETAILS'&&l!=='APPLY')||'';
-  var posted = lines.find(l=>l.startsWith('Posted:'))||'';
-  return i+' | '+posted+' | '+title.substring(0,70);
-}).join('\n')
-```
+
+Run `js/extract_card_list.js` via `javascript_tool`
 
 Use this to identify which cards to process (title hard-block and age check) before opening any DETAILS.
 
@@ -147,10 +142,9 @@ The Job ID is **not visible on the card** — it only appears in the JD body aft
 
 Click the DETAILS button for the job to open the inline JD panel. Two methods — try JS first; fall back to ref if the session redirects to login:
 
-**Method 1 (preferred — simpler):** Use `javascript_tool` to click by index:
-```js
-Array.from(document.querySelectorAll('button')).filter(b=>b.textContent.trim()==='DETAILS')[N].click()
-```
+**Method 1 (preferred — simpler):** Use `javascript_tool` to click by index (replace N with the zero-based card index):
+
+Run `js/click_details_by_index.js` via `javascript_tool`
 
 **Method 2 (fallback):** Use `find` to locate the DETAILS button by title context, then `left_click` via ref.
 
@@ -161,13 +155,8 @@ Wait 2 seconds after clicking, then use `javascript_tool` (`document.body.innerT
 **Capture the URL** using `javascript_tool` (`window.location.href`) while on the DETAILS page — this is the `Posting_URL` to write to `jobs.csv`.
 
 Read the JD via `javascript_tool` (`document.body.innerText`) in chunks to get the full text without truncation:
-```js
-var t = document.body.innerText;
-var idx = t.indexOf('Job ID');
-t.substring(Math.max(0, idx-100), idx+500)   // get Job ID + header
-t.substring(idx+500, idx+2500)               // first chunk
-t.substring(idx+2500, idx+4500)              // second chunk (if needed)
-```
+
+Run `js/read_jd_chunks.js` via `javascript_tool` (run each line separately and combine results)
 
 **Deduplication check (Step B):** Extract the Job ID from the JD text immediately — it appears as `Job ID : NNNNNN`. Check it against the seen-ID set from Phase 1.
 - If already in the set → click "BACK TO LISTING" immediately, log "⏭️ Already seen (ID: NNNNNN)", move to next card. Do not score.
@@ -236,10 +225,9 @@ The form typically has a "Priority Requirements" section with Yes/No dropdowns a
   5. Before opening the next dropdown, call `document.body.click()` via `javascript_tool` to close any open panel — multiple open panels cause `find` to return options from the wrong list.
 
 - **Years of Experience options vary per question** — they are not always the same set. Always read the open panel items before selecting:
-  ```js
-  var panel = document.querySelector('.p-dropdown-panel:not([style*="display: none"])');
-  Array.from(panel.querySelectorAll('.p-dropdown-item')).map((el,i)=>i+': '+el.textContent.trim()).join('\n')
-  ```
+
+  Run `js/read_dropdown_options.js` via `javascript_tool`
+
   Options may be absolute values (`1 year`, `2 years`) or ranges (`2 - 4 years`, `> 4 years`, `> 10 years`) — read the actual list and pick the option that best fits the inventory level.
 
 - **Last Used Year field is not always present** — some questions have only a text box, some add a Years dropdown only, some add both Years + Last Used Year. Check `document.querySelectorAll('p-dropdown').length` before trying to fill year dropdowns.

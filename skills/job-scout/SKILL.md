@@ -389,6 +389,7 @@ For ⚠️ Unverified listings: log with status `pending`, blank Filter_Score, b
 - Browser-only: also update Notes with portal type and navigation quirks if newly discovered
 - Zero matches → set Re-check After to today + 3 days; data roles found → clear Re-check After
 - **Browser-only companies:** Apply the same Re-check After rule regardless of ATS type. Every browser-only company swept this run gets Last Checked = today and Re-check After = today + 7 days if zero data roles found (browser-only boards change less frequently than APIs). Data roles found → clear Re-check After (set the field to blank/empty string — do not write a date).
+- **Cadence override:** If a company's entry in `profile/target-companies.md` contains `Cadence: daily`, always set Re-check After = today + 1 day (regardless of ATS type or whether data roles were found). This overrides the default +3/+7 day rules.
 - **Implementation note:** `target-companies.md` uses em-dashes and long lines that cause the Edit tool to fail on multi-line replacements. Always use a Python/bash script (string `.replace()` per line) for bulk Last Checked / Re-check After updates — never attempt a single multi-line Edit call for more than one row at a time.
 
 **B. `scout-cache.md`:**

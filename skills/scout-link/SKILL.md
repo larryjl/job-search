@@ -43,51 +43,19 @@ Silently load before starting:
   - Scroll down 2–3 ticks and wait 3s to bring the section into view.
   - Call `get_page_text` and confirm **"Jobs where you'd be a top applicant"** appears. If not: scroll further, wait 3s, retry. If still not found after two attempts: output `⚠️ "Jobs where you'd be a top applicant" section not visible. This section requires a LinkedIn Premium account and an active profile. Re-run scout-link when the section is visible.` and stop.
   - Use `javascript_tool` to click the "Show all" link scoped to that section:
-    ```js
-    const h2 = Array.from(document.querySelectorAll('h2')).find(el => el.textContent.trim().includes("top applicant"));
-    let found = null;
-    if (h2) {
-      let el = h2;
-      for (let i = 0; i < 10; i++) {
-        el = el.parentElement;
-        if (!el) break;
-        const target = Array.from(el.querySelectorAll('a, button, div[role="button"]'))
-          .find(e => e.textContent.trim() === 'Show all' || e.textContent.trim().startsWith('Show all'));
-        if (target) { target.click(); found = 'clicked'; break; }
-      }
-    }
-    found || 'not found'
-    ```
+    Run `js/click_show_all_top_applicant.js` via `javascript_tool`
     Wait 3s for results to load.
   - **Verify landing URL:** Confirm the URL now contains `origin=QUALIFICATION_LANDING`. If it does not, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to top applicant results. Re-run scout-link when LinkedIn renders normally.`
 
   **`preferences` (default):**
   - Call `get_page_text` and confirm **"Jobs based on your preferences"** appears. If not: wait 3s and retry once. If still not found after two attempts: output `⚠️ "Jobs based on your preferences" section not visible. Re-run scout-link when the section is visible.` and stop.
   - Use `javascript_tool` to click the "Show all" link scoped to that section:
-    ```js
-    const h2 = Array.from(document.querySelectorAll('h2')).find(el => el.textContent.trim().includes("your preferences"));
-    let found = null;
-    if (h2) {
-      let el = h2;
-      for (let i = 0; i < 10; i++) {
-        el = el.parentElement;
-        if (!el) break;
-        const target = Array.from(el.querySelectorAll('a, button, div[role="button"]'))
-          .find(e => e.textContent.trim() === 'Show all' || e.textContent.trim().startsWith('Show all'));
-        if (target) { target.click(); found = 'clicked'; break; }
-      }
-    }
-    found || 'not found'
-    ```
+    Run `js/click_show_all_preferences.js` via `javascript_tool`
     Wait 3s for results to load.
   - **Verify landing URL:** Confirm the URL has changed from `https://www.linkedin.com/jobs/` to a search results URL. Post-RSC-migration this is `/jobs/search-results/` (the old `/jobs/search/` path is no longer used); accept any URL containing `/jobs/search-results/`, `/jobs/search/`, or a `?` query string with `origin=PREFERENCES_LANDING`. If it has not changed, or if `javascript_tool` returned `'not found'`, scroll down 3 ticks, wait 3s, then try clicking the visible "Show all →" button by coordinate (screenshot first to locate it). If still failing, stop and output `⚠️ Could not navigate to preferences results. Re-run scout-link when LinkedIn renders normally.`
 
 **Page offset (optional):** If the user specified a page number (e.g. "skip to page 3"), apply it after the full mode navigation above is complete and the search results URL is confirmed. Calculate the offset as `(N-1) * 25` and inject it into the current URL:
-```js
-const url = new URL(window.location.href);
-url.searchParams.set('start', [OFFSET]);
-window.location.href = url.toString();
-```
+Run `js/navigate_to_offset.js` via `javascript_tool` (replace `[OFFSET]` with the calculated value)
 Wait 3s for the page to render. The full mode navigation (clicking "Show all", verifying landing URL) always runs first — the offset is applied after the search context is established, never before.
 
 **Login check:** After navigation, call `get_page_text`. If the page contains login/sign-in prompts and no job card content → output:
@@ -107,21 +75,10 @@ and stop.
 ### Step 2a — Render and identify cards
 
 **Scroll to render all cards:** Scroll the results panel to force all cards to render, then return to the top. Use `javascript_tool`:
-```js
-const conts = Array.from(document.querySelectorAll('div, ul')).filter(el => el.scrollHeight > el.clientHeight + 200);
-conts.forEach(c => { c.scrollTop = c.scrollHeight; });
-await new Promise(r => setTimeout(r, 1000));
-conts.forEach(c => { c.scrollTop = 0; });
-'scrolled'
-```
+Run `js/scroll_containers.js` via `javascript_tool`
 
 **Card selector:** the job cards are `div[role="button"]` inside `<main>` whose text is a multi-line block (title / company / location). Filter to these:
-```js
-const main = document.querySelector('main');
-Array.from(main.querySelectorAll('div[role="button"]'))
-  .filter(el => { const t = el.innerText?.trim() || ''; return t.length > 25 && t.length < 400 && t.split('\n').length >= 2; })
-  .length
-```
+Run `js/count_job_cards.js` via `javascript_tool`
 This count is `[N]` (expect up to 25). Per card, the text lines give `title` (first non-empty line), `company` (next), and `location` + `work_type` (infer Remote/Hybrid/On-site from the parenthetical). Ignore "Promoted" / "Viewed" / "Easy Apply" badge lines when parsing.
 
 Announce: `📋 Found [N] job cards on this page.`
@@ -130,44 +87,7 @@ Announce: `📋 Found [N] job cards on this page.`
 
 The job ID is required for the JD fetch (Step 4), the canonical URL, and CSV dedup. Click each card and read the resulting `currentJobId` from the URL. The click updates the URL asynchronously (~130ms typical, measured 68–174ms) — it does **not** load the JD, so a short poll is enough; do not use a multi-second wait. A full 25-card walk takes ~4s. Run the whole walk in **one** `javascript_tool` call (the loop must be a single async block so timing is consistent):
 
-```js
-await (async () => {
-  const main = document.querySelector('main');
-  const getCards = () => Array.from(main.querySelectorAll('div[role="button"]'))
-    .filter(el => { const t = el.innerText?.trim() || ''; return t.length > 25 && t.length < 400 && t.split('\n').length >= 2; });
-  const curId = () => new URL(location.href).searchParams.get('currentJobId');
-  const results = [];
-  const seenIds = new Set();
-  const total = getCards().length;
-  for (let i = 0; i < total; i++) {
-    const card = getCards()[i];                // re-query each iteration (list may re-render)
-    if (!card) { results.push({ i, err: 'no-card' }); continue; }
-    const lines = card.innerText.split('\n').map(s => s.trim()).filter(Boolean);
-    const title = (lines[0] || '').slice(0, 80);
-    const company = (lines[1] || '').slice(0, 80);
-    const idBefore = curId();
-    let id = null;
-    for (let attempt = 0; attempt < 3 && !id; attempt++) {        // retry click up to 3x
-      card.scrollIntoView({ block: 'center' });
-      await new Promise(r => setTimeout(r, 30));
-      card.click();
-      // The click updates the URL's currentJobId asynchronously (~70-175ms measured), NOT a JD render.
-      // Tight poll: exit the instant the id changes; 1s ceiling as a safety net for a slow card.
-      for (let w = 0; w < 50; w++) {                               // 20ms x 50 = 1s ceiling
-        await new Promise(r => setTimeout(r, 20));
-        const now = curId();
-        if (now && now !== idBefore) { id = now; break; }
-      }
-      if (!id && attempt === 0 && i === 0) id = curId();           // first card may already be selected
-    }
-    if (!id) id = curId();
-    results.push({ i, title, company, id, dup: seenIds.has(id) });
-    if (id) seenIds.add(id);
-  }
-  window.__cardWalk = { hidden: document.hidden, total, collected: results.length, uniqueIds: seenIds.size, nulls: results.filter(x => !x.id).length, results };
-})();
-JSON.stringify({ total: window.__cardWalk.total, uniqueIds: window.__cardWalk.uniqueIds, nulls: window.__cardWalk.nulls })
-```
+Run `js/harvest_job_ids.js` via `javascript_tool`
 
 Then read the full pairs with a second call: `JSON.stringify(window.__cardWalk.results)`.
 
@@ -233,35 +153,10 @@ Announce: `⏭️ [N] card(s) skipped (title or location) — [N] title-skip(s) 
 For each card that passed Step 3, fetch the full job data via the Voyager API from within the page context. This call inherits the user's LinkedIn session cookies and requires no tab focus or DOM rendering.
 
 **Read the CSRF token once** before the loop:
-```js
-const csrf = document.cookie.match(/JSESSIONID="?([^";]+)/)?.[1] || '';
-csrf
-```
+Run `js/extract_csrf.js` via `javascript_tool`
 
 **Per-card API fetch:**
-```js
-const jobId = '[JOB_ID]';
-const resp = await fetch(`/voyager/api/jobs/jobPostings/${jobId}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebFullJobPosting-65`, {
-  headers: {
-    'accept': 'application/vnd.linkedin.normalized+json+2.1',
-    'csrf-token': '[CSRF]',
-    'x-restli-protocol-version': '2.0.0',
-  },
-  credentials: 'include'
-});
-const data = await resp.json();
-const d = data?.data;
-JSON.stringify({
-  status: resp.status,
-  title: d?.title,
-  company: data?.included?.find(i => i.$type?.includes('Company'))?.name,
-  loc: d?.formattedLocation,
-  remoteAllowed: d?.workRemoteAllowed,
-  listedAt: d?.listedAt,
-  descLen: d?.description?.text?.length,
-  desc: d?.description?.text
-})
-```
+Run `js/fetch_job_posting.js` via `javascript_tool` (replace `[JOB_ID]` and `[CSRF]` with current values)
 
 **Error handling:**
 - Non-200 response → log `⚠️ API error [status] for [Company] — [Title] (ID: [jobId]); skipping` and proceed to next card.
@@ -271,15 +166,7 @@ JSON.stringify({
 **Age skip (post-fetch):** Convert `listedAt` (Unix ms) to a date. If `new Date(listedAt) < today − 14 days` (strictly more than 14 days old) → skip with `⛔ age-skip`. Exactly 14 days old passes. Add to card-skip cache (Step 7) but NOT to DISMISS_QUEUE.
 
 **All-duplicate check:** If every card on the current page was a title-skip, location-skip, dedup, or age-skip — i.e. zero new JDs were extracted and scored — automatically advance to the next page. Prefer incrementing the `start` offset in the URL by 25 (most reliable post-RSC), falling back to a "Next" button click if present. Use `javascript_tool`:
-```js
-// Preferred: bump the start offset by 25 and reload the results
-const u = new URL(window.location.href);
-const cur = parseInt(u.searchParams.get('start') || '0', 10);
-u.searchParams.set('start', cur + 25);
-const next = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.trim() === 'Next');
-if (next) { next.click(); 'clicked-next' }
-else { window.location.href = u.toString(); 'offset-advanced' }
-```
+Run `js/advance_to_next_page.js` via `javascript_tool`
 Wait 3s, then restart from Step 2. Continue until at least one new JD is found or no "Next" button exists: `📭 All pages exhausted — no new roles found.`
 
 **JD extraction:** Use `d?.description?.text` directly from the API response — no DOM selectors, no anchors, no chunking needed. If `desc` is null or empty → log `⚠️ [Company] — [Title] (ID: [jobId]) → no JD in API response; skipping`.
@@ -431,24 +318,7 @@ Dismiss all? (yes / no / edit list)
 On **yes**: execute the dismiss clicks for every card in the queue using the JS snippet below, one at a time. Log `✓ dismissed` or `⚠️ not found` per card. On **no**: skip all dismissals. On **edit list**: show the list again and let the user specify which numbers to keep or remove, then confirm again.
 
 **Dismiss JS** (run once per card — replace `[Job Title]` and `[Company]` with exact strings):
-```js
-// Use aria-label*= (contains) — LinkedIn adds trailing spaces to aria-labels.
-// Always verify BOTH title AND company in the same ancestor before clicking.
-const allBtns = Array.from(document.querySelectorAll('button[aria-label*="Dismiss [Job Title]"]'));
-let dismissed = 'not found';
-for (const btn of allBtns) {
-  let el = btn;
-  for (let i = 0; i < 12; i++) {
-    el = el.parentElement;
-    if (!el) break;
-    if (el.textContent.includes('[Job Title]') && el.textContent.includes('[Company]')) {
-      btn.click(); dismissed = 'dismissed'; break;
-    }
-  }
-  if (dismissed === 'dismissed') break;
-}
-dismissed
-```
+Run `js/dismiss_card.js` via `javascript_tool` (replace `[Job Title]` and `[Company]` with exact strings)
 Replace `[Job Title]` and `[Company]` with exact strings from Step 2. If `'not found'`, skip silently — do not let a failed dismiss block the run. **Never dismiss a card without confirming both the job title AND company name are present in the same DOM ancestor.**
 
 ---

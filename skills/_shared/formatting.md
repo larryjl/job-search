@@ -30,13 +30,19 @@ BLACK = RGBColor(0x1A, 0x1A, 0x1A)  # #1A1A1A — body text, dates, contact line
 
 ## Font Family
 
-**Arial** throughout all documents — no exceptions.
+**Arial** for all body text, bullets, section headings, and contact lines — no exceptions.
+
+**Georgia** for the candidate name only (header line). This is the sole exception to Arial.
 
 ```python
-run.font.name = "Arial"
+# Body text, headings, bullets, contact line:
+run.font.name = FONT        # "Arial"
+
+# Candidate name header only:
+run.font.name = FONT_NAME   # "Georgia"
 ```
 
-Apply to every `run` object. Do not use Calibri, Times New Roman, or any other font.
+Do not use Calibri, Times New Roman, or any other font.
 
 ---
 
@@ -63,16 +69,13 @@ from docx.shared import Pt
 
 ## Page Margins
 
-1 inch on all sides for both resumes and cover letters.
+**0.85 inches** on all sides for resumes. Cover letters use 1 inch.
+
+Use `set_margins(doc)` — the default is `MARGIN_IN = 0.85`. Pass `inches=1` explicitly for cover letters.
 
 ```python
-from docx.shared import Inches
-
-for section in doc.sections:
-    section.top_margin    = Inches(1)
-    section.bottom_margin = Inches(1)
-    section.left_margin   = Inches(1)
-    section.right_margin  = Inches(1)
+set_margins(doc)           # resumes — 0.85"
+set_margins(doc, inches=1) # cover letters — 1"
 ```
 
 ---
@@ -96,7 +99,7 @@ Standard spacing values:
 
 | Context | space_before | space_after |
 |---------|-------------|-------------|
-| Candidate name | 0 | 2 |
+| Candidate name | 4 | 4 |
 | Contact line | 0 | 12 |
 | Date / address block | 0 | 8 |
 | "Re:" line (cover letter) | 0 | 12 |
@@ -104,7 +107,7 @@ Standard spacing values:
 | Body paragraph | 0 | 10 |
 | Sign-off ("Sincerely,") | 12 | 0 |
 | Closing name | 24 | 0 |
-| Section heading (resume) | 8 | 2 |
+| Section heading (resume) | 10 | 3 |
 | Bullet point (resume) | 0 | 2 |
 
 ---
@@ -117,9 +120,9 @@ These are implemented in `skills/lib/docx_helpers.py`. **Import them — do not 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../lib'))
 from docx_helpers import (
-    NAVY, BLACK, FONT,
+    NAVY, BLACK, FONT, FONT_NAME, MARGIN_IN,
     set_spacing, add_run, set_margins, keep_with_next,
-    add_company_date_row, add_rule, add_bullet,
+    add_section_heading, add_company_date_row, add_rule, add_bullet,
     add_prof_dev_item, set_metadata,
 )
 ```
@@ -127,7 +130,8 @@ from docx_helpers import (
 Available functions:
 - `set_spacing(paragraph, before, after, line)` — paragraph spacing in pt
 - `add_run(paragraph, text, bold, size, color)` — styled run with Arial font
-- `set_margins(doc, inches=1)` — 1-inch margins on all sides
+- `set_margins(doc)` — 0.85" margins on all sides (pass `inches=1` for cover letters)
+- `add_section_heading(doc, text)` — ALL-CAPS 12pt bold NAVY heading with 2pt navy left border
 - `keep_with_next(paragraph)` — prevent page break after heading/company row
 - `add_company_date_row(doc, company, date_range)` — flush-right date tab
 - `add_rule(doc, color, size)` — horizontal rule via paragraph border
