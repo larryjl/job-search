@@ -46,12 +46,13 @@ Run this phase before navigating to the job search page. If already logged in, s
 
 ### Step 0.1: Check for Autofill, Then Fill if Needed
 
-Chrome's password manager autofills the email and password fields automatically on this portal. Check field state before filling:
+Chrome's password manager autofills the email and password fields on this portal, but the autofilled password value is **not readable via JS or `read_page`** (browser security restriction). Use this sequence:
 
-1. Call `read_page` (filter: interactive) to inspect the email and password fields.
-2. If both fields are already populated → do not use `form_input`. Proceed directly to clicking "Sign in".
-3. If either field is empty → use `find` + `form_input` to fill only the empty field(s) with the account email (`leelawrencej@gmail.com`) and/or password from the saved credential.
-4. Use `find` to locate the "Sign in" button and click it. Wait 3 seconds.
+1. Call `read_page` (filter: interactive) to inspect the email field only.
+2. If the email field is empty → use `form_input` (ref from `read_page`) to fill it with `leelawrencej@gmail.com`.
+3. **Do not attempt to check or fill the password field via JS or `form_input`** — Chrome autofills it natively and it will appear populated in a screenshot even when `.value` reads as empty.
+4. Take a screenshot using `mcp__Claude_in_Chrome__computer` (`action: "screenshot"`) to visually confirm the password field shows dots (autofilled). If it appears empty in the screenshot, stop and ask the user to fill it manually.
+5. Click "Sign in" using `mcp__Claude_in_Chrome__computer` (`action: "left_click"`) at the button coordinates visible in the screenshot. Do **not** use `find` + ref click — the autofilled password is only submitted when the click originates as a real browser-level event. Wait 4 seconds for redirect.
 
 ### Step 0.2: Handle Verification Code (if prompted)
 
